@@ -1,0 +1,22 @@
+# ─────────────────────────────────────────────────────────────
+#  NEXUS — Python Dependencies
+#  Install:  pip install -r requirements.txt
+# ─────────────────────────────────────────────────────────────
+
+# ── Core / System ────────────────────────────────────────────
+numpy>=1.24
+
+# ── Voice / Audio Pipeline ───────────────────────────────────
+sounddevice>=0.4.6          # Microphone capture via PortAudio
+scipy>=1.10                 # Resampling (resample_poly) & Butterworth filter
+
+# ── Speech-to-Text ───────────────────────────────────────────
+faster-whisper>=1.0.0       # Local Whisper inference via CTranslate2 (offline)
+
+# ── Wake Word Detection ──────────────────────────────────────
+openwakeword>=0.6.0         # Offline wake-word engine (recommended)
+onnxruntime>=1.16           # Required backend for openWakeWord on Linux
+
+# ── System-level dependencies (not pip-installable) ──────────
+# sudo apt install libportaudio2 portaudio19-dev -y
+# sudo apt install ffmpeg -y
