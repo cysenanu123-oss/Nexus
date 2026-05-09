@@ -395,7 +395,7 @@ def cmd_history(history: list[str]):
 #  COMMAND PARSER
 # ─────────────────────────────────────────────────────────────
 
-def parse_and_dispatch(raw: str, history: list[str], voice_engine=None, intent_engine=None, dispatcher=None, speaker=None, is_voice: bool = False) -> bool:
+def parse_and_dispatch(raw: str, history: list[str], voice_engine=None, brain=None, speaker=None, is_voice: bool = False) -> bool:
     """
     Parse a raw input string, dispatch to the correct handler.
     Returns False when the user wants to exit, True otherwise.
@@ -440,22 +440,12 @@ def parse_and_dispatch(raw: str, history: list[str], voice_engine=None, intent_e
         except Exception as exc:
             Printer.error(f"Command '{cmd}' raised an error: {exc}")
     else:
-        # Fallback to IntentEngine for natural language commands
-        if intent_engine and dispatcher:
-            intent = intent_engine.parse(raw)
-            result = dispatcher.dispatch(intent)
-            if result.success:
-                Printer.ok(str(result))
-            else:
-                Printer.error(str(result))
-            
-            # Speak the result
+        # All natural language routed through Brain (memory + reasoning + conversation)
+        if brain:
+            response = brain.think(raw)
+            Printer.nexus(response)
             if speaker:
-                if is_voice:
-                    # Block so the microphone doesn't record our own speech!
-                    speaker.say_result(result, block=True)
-                else:
-                    speaker.say_result(result, block=False)
+                speaker.say(response, block=is_voice)
         else:
             Printer.warn(
                 f"Unknown command '{Color.BRIGHT_WHITE}{cmd}{Color.RESET}"
@@ -493,8 +483,7 @@ def prompt_string() -> str:
 # ─────────────────────────────────────────────────────────────
 
 from voice.engine import VoiceEngine
-from core.intent_engine import IntentEngine
-from core.dispatcher import Dispatcher
+from core.brain import Brain
 from voice.tts import Speaker
 
 def main():
@@ -506,13 +495,12 @@ def main():
 
     session_history: list[str] = []
 
-    intent_engine = IntentEngine(backend="rules")
-    dispatcher    = Dispatcher()
-    speaker       = Speaker()
+    brain    = Brain(user_name="Senanu")
+    speaker  = Speaker()
 
     voice_engine = VoiceEngine(
         command_callback=lambda text:
-            parse_and_dispatch(text, session_history, voice_engine, intent_engine, dispatcher, speaker, is_voice=True)
+            parse_and_dispatch(text, session_history, voice_engine, brain=brain, speaker=speaker, is_voice=True)
     )
     voice_engine.start()
 
@@ -525,7 +513,7 @@ def main():
             Printer.blank()
             break
 
-        alive = parse_and_dispatch(raw, session_history, voice_engine, intent_engine, dispatcher, speaker, is_voice=False)
+        alive = parse_and_dispatch(raw, session_history, voice_engine, brain=brain, speaker=speaker, is_voice=False)
         if not alive:
             break
 
