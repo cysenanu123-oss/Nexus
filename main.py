@@ -13,6 +13,7 @@ import platform
 import datetime
 import subprocess
 from typing import Optional
+from core.logger import setup_logging
 
 
 # ─────────────────────────────────────────────────────────────
@@ -487,6 +488,7 @@ from core.brain import Brain
 from voice.tts import Speaker
 
 def main():
+    setup_logging()
     print_banner()
     run_boot_sequence()
 

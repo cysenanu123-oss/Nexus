@@ -1,0 +1,35 @@
+# Virtual environment
+nexus_env/
+venv/
+.venv/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Data & memory (personal)
+data/
+logs/
+
+# Models (too large for git)
+models/
+*.onnx
+*.tflite
+*.bin
+*.pt
+*.gguf
+
+# Secrets & config overrides
+.env
+*.key
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/settings.json
+.idea/

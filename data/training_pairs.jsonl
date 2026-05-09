@@ -1,0 +1,4 @@
+{"input": "what did i remember", "output": "Recent conversation:\n  \u2022 good\n  \u2022 bsd\n  \u2022 bab", "intent": "recall", "quality": 1.0, "timestamp": 1778365650.082524}
+{"input": "remove all", "output": "Not sure how to answer that. Rephrase?", "intent": "unknown", "quality": 1.0, "timestamp": 1778365664.9169562}
+{"input": "remember my exam is friday", "output": "Got it \u2014 remembered: \"my exam is friday\"", "intent": "remember", "quality": 1.0, "timestamp": 1778365684.0849957}
+{"input": "open firefox", "output": "Opening firefox (firefox)", "intent": "open_application", "quality": 1.0, "timestamp": 1778365705.5036314}

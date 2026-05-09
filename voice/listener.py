@@ -63,7 +63,7 @@ DTYPE           = "int16"  # 16-bit PCM
 CHUNK_MS        = 400
 
 # Voice Activity Detection
-VAD_ENERGY_THRESHOLD  = 0.01   # RMS threshold — below = silence
+VAD_ENERGY_THRESHOLD  = 0.02   # RMS threshold — tuned for ALC257 ambient noise
 VAD_SPEECH_PAD_MS     = 300    # ms of silence to keep after speech ends
 VAD_MIN_SPEECH_MS     = 200    # ignore bursts shorter than this
 VAD_MAX_PHRASE_SEC    = 15     # hard cut — max length of one captured phrase
@@ -234,7 +234,7 @@ class MicrophoneListener:
             samplerate=self._capture_rate,
             channels=CHANNELS,
             dtype=DTYPE,
-            blocksize=self._chunk_frames,
+            blocksize=0,
             latency="high",
         )
         self._stream.start()
@@ -307,10 +307,9 @@ class MicrophoneListener:
         The highpass filter works on the native capture rate.
         """
         if self.noise_filter:
-            # _highpass_filter returns float32 — pass directly to _rms
             filtered = _highpass_filter(chunk, sr=self._capture_rate)
-            # _rms on float32: values already in [-1,1], no /32768 needed
-            energy = float(np.sqrt(np.mean(filtered ** 2)))
+            # filtered is float32 but still in int16 scale — normalize before RMS
+            energy = float(np.sqrt(np.mean((filtered / 32768.0) ** 2)))
         else:
             energy = _rms(chunk)
         return energy >= self.vad_threshold
@@ -338,7 +337,7 @@ class MicrophoneListener:
 
         # Chunk counts must use _capture_rate (hardware rate) because that's
         # what sets how many frames arrive per read — not the Whisper rate.
-        frames_per_chunk = self._chunk_frames
+        frames_per_chunk = max(1, self._chunk_frames or int(self._capture_rate * self.chunk_ms / 1000.0))
 
         pad_chunks = max(1, int((self.vad_pad_ms  / 1000.0) * self._capture_rate / frames_per_chunk))
         min_chunks = max(1, int((self.vad_min_ms  / 1000.0) * self._capture_rate / frames_per_chunk))
