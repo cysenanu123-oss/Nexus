@@ -73,7 +73,9 @@ class WakeWordDetector:
             raise
 
         # Build mel filterbank (same params used during training)
+        # pyrefly: ignore [missing-import]
         import torchaudio.transforms as T
+        # pyrefly: ignore [missing-import]
         import torch
         self._mel = T.MelSpectrogram(
             sample_rate=SAMPLE_RATE,
@@ -115,32 +117,39 @@ class WakeWordDetector:
 
     # ── Blocking API ─────────────────────────────────────────────────────
 
-    def wait_for_wake_word(self) -> None:
-        """Block until 'Hey Nexus' is detected."""
+    def wait_for_wake_word(self, listener=None) -> None:
+        """Block until 'Hey Nexus' is detected. Uses shared listener if provided."""
         log.info("Listening for wake word...")
-        window = np.zeros(SAMPLE_RATE, dtype=np.float32)  # 1s rolling window @ model rate
+        window = np.zeros(SAMPLE_RATE, dtype=np.float32)
 
-        # Capture at native mic rate, resample to model rate per chunk
-        capture_hop = int(HOP_LENGTH * CAPTURE_RATE / SAMPLE_RATE)
+        while True:
+            # Use shared listener (no new mic stream opened)
+            if listener is not None:
+                chunk_int16 = listener.read_chunk(timeout=1.0)
+                if chunk_int16 is None:
+                    continue
+                chunk = chunk_int16.astype(np.float32) / 32768.0
+                if listener._capture_rate != SAMPLE_RATE:
+                    chunk = _resample(chunk)
+            else:
+                # Fallback: open own stream only if no listener provided
+                capture_hop = int(HOP_LENGTH * CAPTURE_RATE / SAMPLE_RATE)
+                with sd.InputStream(samplerate=CAPTURE_RATE, channels=1,
+                                    dtype="float32", blocksize=capture_hop) as stream:
+                    chunk, _ = stream.read(capture_hop)
+                    chunk    = _resample(chunk[:, 0])
 
-        with sd.InputStream(samplerate=CAPTURE_RATE, channels=1,
-                            dtype="float32", blocksize=capture_hop) as stream:
-            while True:
-                chunk, _ = stream.read(capture_hop)
-                chunk    = _resample(chunk[:, 0])   # 44100→16000
+            window = np.roll(window, -len(chunk))
+            window[-len(chunk):] = chunk
 
-                # Slide window
-                window   = np.roll(window, -len(chunk))
-                window[-len(chunk):] = chunk
+            score = self._predict(window)
 
-                score = self._predict(window)
-
-                if score >= self.threshold:
-                    now = time.time()
-                    if now - self._last_trigger >= COOLDOWN:
-                        self._last_trigger = now
-                        log.info(f"Wake word detected! (score={score:.3f})")
-                        return
+            if score >= self.threshold:
+                now = time.time()
+                if now - self._last_trigger >= COOLDOWN:
+                    self._last_trigger = now
+                    log.info(f"Wake word detected! (score={score:.3f})")
+                    return
 
     # ── Callback API ─────────────────────────────────────────────────────
 
@@ -161,26 +170,35 @@ class WakeWordDetector:
             self._thread.join(timeout=3)
         log.info("Wake word detector stopped.")
 
-    def _listen_loop(self, callback: Callable) -> None:
+    def _listen_loop(self, callback: Callable, listener=None) -> None:
         window = np.zeros(SAMPLE_RATE, dtype=np.float32)
-        capture_hop = int(HOP_LENGTH * CAPTURE_RATE / SAMPLE_RATE)
 
-        with sd.InputStream(samplerate=CAPTURE_RATE, channels=1,
-                            dtype="float32", blocksize=capture_hop) as stream:
-            while self._running:
-                chunk, _ = stream.read(capture_hop)
-                chunk    = _resample(chunk[:, 0])   # 44100→16000
-                window   = np.roll(window, -len(chunk))
-                window[-len(chunk):] = chunk
+        while self._running:
+            if listener is not None:
+                chunk_int16 = listener.read_chunk(timeout=1.0)
+                if chunk_int16 is None:
+                    continue
+                chunk = chunk_int16.astype(np.float32) / 32768.0
+                if listener._capture_rate != SAMPLE_RATE:
+                    chunk = _resample(chunk)
+            else:
+                capture_hop = int(HOP_LENGTH * CAPTURE_RATE / SAMPLE_RATE)
+                with sd.InputStream(samplerate=CAPTURE_RATE, channels=1,
+                                    dtype="float32", blocksize=capture_hop) as stream:
+                    chunk, _ = stream.read(capture_hop)
+                    chunk    = _resample(chunk[:, 0])
 
-                score = self._predict(window)
+            window = np.roll(window, -len(chunk))
+            window[-len(chunk):] = chunk
 
-                if score >= self.threshold:
-                    now = time.time()
-                    if now - self._last_trigger >= COOLDOWN:
-                        self._last_trigger = now
-                        log.info(f"Wake word! score={score:.3f}")
-                        callback()
+            score = self._predict(window)
+
+            if score >= self.threshold:
+                now = time.time()
+                if now - self._last_trigger >= COOLDOWN:
+                    self._last_trigger = now
+                    log.info(f"Wake word! score={score:.3f}")
+                    callback()
 
     # ── Context manager ──────────────────────────────────────────────────
 

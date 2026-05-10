@@ -63,25 +63,29 @@ class VoiceEngine:
         whisper_model: str = "tiny",
     ):
         self.command_callback = command_callback
-        self.wake_phrase = wake_phrase
-        self.whisper_model = whisper_model
+        self.wake_phrase      = wake_phrase
+        self.whisper_model    = whisper_model
 
-        self._running = False
+        self._running         = False
         self._continuous_mode = False
         self._thread: Optional[threading.Thread] = None
 
         # Core systems
-        self.listener = MicrophoneListener()
+        self.listener    = MicrophoneListener()
+        self.detector    = WakeWordDetector(threshold=0.85)
+        self.transcriber = Transcriber(model_size=self.whisper_model)
 
-        self.detector = WakeWordDetector(
-            wake_phrase=self.wake_phrase,
-            model_path="models/wakeword/hey_nexus.onnx",
-            listener=self.listener
-        )
-
-        self.transcriber = Transcriber(
-            model_size=self.whisper_model
-        )
+        # Speaker ID — loads profile if enrolled
+        try:
+            from voice.speaker_id import SpeakerIdentifier
+            self.speaker_id = SpeakerIdentifier()
+            if self.speaker_id.is_enrolled():
+                logger.info("Speaker ID active — owner profile loaded.")
+            else:
+                logger.info("Speaker ID loaded — no profile enrolled yet.")
+        except Exception as e:
+            logger.warning("Speaker ID unavailable: %s", e)
+            self.speaker_id = None
 
     # ─────────────────────────────────────────────────────────
     #  Lifecycle
@@ -95,16 +99,14 @@ class VoiceEngine:
         logger.info("Starting NEXUS Voice Engine...")
 
         self.listener.start()
-        self.detector.start()
+        # WakeWordDetector opens its own mic stream internally
 
         self._running = True
-
-        self._thread = threading.Thread(
+        self._thread  = threading.Thread(
             target=self._main_loop,
             daemon=True,
             name="nexus-voice-engine",
         )
-
         self._thread.start()
 
         print("\n[NEXUS] Voice Engine ONLINE")
@@ -116,10 +118,7 @@ class VoiceEngine:
             return
 
         logger.info("Stopping NEXUS Voice Engine...")
-
         self._running = False
-
-        self.detector.stop()
         self.listener.stop()
 
         if self._thread:
@@ -128,13 +127,14 @@ class VoiceEngine:
         print("\n[NEXUS] Voice Engine OFFLINE")
 
     def trigger(self, continuous: bool = True):
-        """Manually trigger the voice engine to start listening immediately.
-        If continuous=True, it will keep listening until told to stop."""
+        """
+        Manually trigger voice listening — skips wake word detection.
+        If continuous=True, NEXUS keeps listening until told to stop.
+        """
         if not self._running:
             logger.error("Voice Engine is not running.")
             return
         self._continuous_mode = continuous
-        self.detector.trigger()
 
     # ─────────────────────────────────────────────────────────
     #  Main Runtime Loop
@@ -145,31 +145,18 @@ class VoiceEngine:
 
         while self._running:
 
-            # 1. WAIT FOR WAKE WORD (if not in continuous mode)
+            # ── 1. WAIT FOR WAKE WORD ─────────────────────────
             if not self._continuous_mode:
-                result = self.detector.wait_for_wake_word()
-
-                if not result:
-                    continue
-
+                self.detector.wait_for_wake_word(listener=self.listener)
                 print("\n[NEXUS] Wake word detected")
-            
+
             print("[NEXUS] Listening...\n")
 
-            # Small pause to avoid clipping
+            # Small pause to avoid clipping the first syllable
             time.sleep(0.2)
 
-            # PAUSE detector so it stops stealing audio chunks
-            self.detector.pause()
-
-            try:
-                # 2. RECORD USER SPEECH
-                audio = self.listener.capture_phrase(
-                    verbose=False,
-                )
-            finally:
-                # RESUME detector
-                self.detector.resume()
+            # ── 2. RECORD USER SPEECH ─────────────────────────
+            audio = self.listener.capture_phrase(verbose=False)
 
             if audio is None or len(audio) == 0:
                 print("[NEXUS] No speech captured.")
@@ -178,9 +165,17 @@ class VoiceEngine:
                     self._continuous_mode = False
                 continue
 
-            # 3. TRANSCRIBE
-            print("[NEXUS] Transcribing...")
+            # ── 2b. SPEAKER VERIFICATION ──────────────────────
+            if self.speaker_id and self.speaker_id.is_enrolled():
+                result = self.speaker_id.verify(audio)
+                if not result.accepted:
+                    print(f"[NEXUS] Unknown speaker rejected (score={result.score:.2f})")
+                    if not self._continuous_mode:
+                        print("\n[NEXUS] Waiting for wake word...\n")
+                    continue
 
+            # ── 3. TRANSCRIBE ─────────────────────────────────
+            print("[NEXUS] Transcribing...")
             transcript = self.transcriber.transcribe(audio)
 
             if not transcript.is_speech:
@@ -191,26 +186,24 @@ class VoiceEngine:
                 continue
 
             text = transcript.text.strip()
-
             print(f"\n[USER] {text}\n")
 
-            # Handle exit words to drop out of continuous mode
+            # Handle exit words
             lower_text = text.lower().strip(".?!,;")
-            if lower_text in ["stop", "exit", "quit", "cancel", "nevermind", "stop listening"]:
+            if lower_text in ["stop", "exit", "quit", "cancel",
+                              "nevermind", "stop listening"]:
                 print("[NEXUS] Exiting voice mode.\n")
                 self._continuous_mode = False
-                # If they just said stop/cancel to drop out of voice mode, skip dispatch
                 if lower_text not in ["exit", "quit"]:
                     continue
 
-            # 4. EXECUTE COMMAND
+            # ── 4. EXECUTE COMMAND ────────────────────────────
             try:
                 alive = self.command_callback(text)
                 if alive is False:
                     self._continuous_mode = False
                     self._running = False
                     break
-
             except Exception as exc:
                 logger.exception("Command execution failed.")
                 print(f"[NEXUS] Execution error: {exc}")
@@ -224,39 +217,29 @@ class VoiceEngine:
 # ─────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
+    import logging as _logging
 
-    import logging
-
-    logging.basicConfig(
-        level=logging.INFO,
+    _logging.basicConfig(
+        level=_logging.INFO,
         format="%(asctime)s  %(levelname)s  %(name)s — %(message)s",
         datefmt="%H:%M:%S",
     )
 
-    # Simple test parser
     def fake_command_parser(text: str):
-
-        print(f"[COMMAND PARSER] Received: {text}")
-
+        print(f"[COMMAND PARSER] Received: {text!r}")
         if text == "status":
             print("[NEXUS] All systems operational.")
-
-        elif text == "hello":
+        elif "hello" in text:
             print("[NEXUS] Hello, Senanu.")
-
         else:
             print(f"[NEXUS] Unknown command: {text}")
 
-    engine = VoiceEngine(
-        command_callback=fake_command_parser
-    )
+    engine = VoiceEngine(command_callback=fake_command_parser)
 
     try:
         engine.start()
-
         while True:
             time.sleep(1)
-
     except KeyboardInterrupt:
         print("\nStopping...")
         engine.stop()

@@ -2,3 +2,16 @@
 {"input": "remove all", "output": "Not sure how to answer that. Rephrase?", "intent": "unknown", "quality": 1.0, "timestamp": 1778365664.9169562}
 {"input": "remember my exam is friday", "output": "Got it \u2014 remembered: \"my exam is friday\"", "intent": "remember", "quality": 1.0, "timestamp": 1778365684.0849957}
 {"input": "open firefox", "output": "Opening firefox (firefox)", "intent": "open_application", "quality": 1.0, "timestamp": 1778365705.5036314}
+{"input": "thank you.", "output": "Not sure how to answer that. Rephrase?", "intent": "unknown", "quality": 1.0, "timestamp": 1778417943.262709}
+{"input": "what is the time?", "output": "The time is 08:59 AM \u2014 Sunday, May 10 2026", "intent": "get_time", "quality": 1.0, "timestamp": 1778417961.2977636}
+{"input": "with.", "output": "Not sure how to answer that. Rephrase?", "intent": "unknown", "quality": 1.0, "timestamp": 1778417972.1823041}
+{"input": "squids.", "output": "I don't have a response for that yet.", "intent": "unknown", "quality": 1.0, "timestamp": 1778417978.7329822}
+{"input": "as it is.", "output": "That one's beyond me right now.", "intent": "unknown", "quality": 1.0, "timestamp": 1778417990.6758943}
+{"input": "as it is.", "output": "I don't have a response for that yet.", "intent": "unknown", "quality": 1.0, "timestamp": 1778418000.2851858}
+{"input": "never mind.", "output": "That one's beyond me right now.", "intent": "unknown", "quality": 1.0, "timestamp": 1778418011.6948445}
+{"input": "xeit", "output": "I understood the words. Not the meaning.", "intent": "unknown", "quality": 1.0, "timestamp": 1778418021.3958538}
+{"input": "hey, next time!", "output": "The time is 09:39 AM \u2014 Sunday, May 10 2026", "intent": "get_time", "quality": 1.0, "timestamp": 1778420358.6502738}
+{"input": "remind me i have a meeting tomorrow.", "output": "Recent conversation:\n  \u2022 never mind.\n  \u2022 xeit\n  \u2022 hey, next time!", "intent": "recall", "quality": 1.0, "timestamp": 1778420374.635189}
+{"input": "hey, next was end.", "output": "NEXUS online. Go ahead.", "intent": "greet", "quality": 1.0, "timestamp": 1778420396.4547389}
+{"input": "hey nexus!", "output": "Hey Senanu. What do you need?", "intent": "greet", "quality": 1.0, "timestamp": 1778420414.3731403}
+{"input": "hi", "output": "Ready.", "intent": "greet", "quality": 1.0, "timestamp": 1778420446.385859}

@@ -162,7 +162,7 @@ Allow NEXUS to hear, transcribe, and understand spoken commands.
 * [DONE] Integrate speech-to-text engine (`voice/speech_to_text.py` via faster-whisper)
 * [DONE] Add text-to-speech engine (`voice/tts.py` — using espeak and sounddevice)
 * [NOT STARTED] Add real-time transcription
-* [DONE] Add wake-word detection (`voice/wakeword.py` — openWakeWord + fallback VAD backend)
+* [DONE] Add wake-word detection (`voice/wakeword.py` — custom ONNX model trained on owner's voice)
 * [DONE] Reduce background noise (Butterworth high-pass filter at 80 Hz to remove HVAC/fan rumble)
 * [NOT STARTED] Add command interruption support
 * [NOT STARTED] Add multilingual support
@@ -176,20 +176,19 @@ Allow NEXUS to hear, transcribe, and understand spoken commands.
 * [DONE] `test_microphone()` — live terminal RMS meter for mic level calibration
 * [DONE] `list_devices()` / `print_devices()` — enumerate available audio input devices
 * [DONE] Automatic hardware sample rate detection with resampling to 16 kHz (Whisper-ready)
-* [IN PROGRESS] `WakeWordDetector` class (`voice/wakeword.py`)
-  * [DONE] openWakeWord backend — feeds 80 ms frames to pre-trained `hey_jarvis` model (closest to "Hey Nexus")
-  * [DONE] Fallback VAD backend — energy burst duration pattern, zero extra dependencies
-  * [DONE] `wait_for_wake_word()` — blocking API for synchronous usage
-  * [DONE] Callback API — async/event-driven usage
-  * [DONE] Cooldown guard to prevent double-fire
-  * [DONE] Context manager (`with WakeWordDetector() as det:`)
-  * [NOT STARTED] Custom "Hey Nexus" model training (Google Colab notebook)
-  * [NOT STARTED] Verifier model for speaker-specific activation
+* [DONE] `WakeWordDetector` class (`voice/wakeword.py`)
+  * [DONE] Custom "Hey Nexus" ONNX model — small CNN trained locally on 100 positive + 100 negative samples
+  * [DONE] Recording tool (`tools/record_wakeword.py`) — interactive, RMS quality gating, 2-sec WAV clips
+  * [DONE] Training script (`tools/train_wakeword.py`) — torchaudio mel-spectrogram CNN, scipy WAV loader, self-contained ONNX export
+  * [DONE] 44100 Hz capture → 16000 Hz resample pipeline (scipy `resample_poly`)
+  * [DONE] `wait_for_wake_word(listener=)` — shared mic listener support
+  * [DONE] Rolling 1-second window inference with cooldown guard
+  * [DONE] Confirmed detection: scores 0.869–1.000 in live testing
 * [DONE] `Transcriber` class (`voice/speech_to_text.py`)
   * [DONE] `faster-whisper` backend with VAD filtering
   * [DONE] Audio normalization & confidence scoring
   * [DONE] CLI testing modes (`--file`, `--listen`, `--bench`)
-* [DONE] Voice Engine loop (`voice/engine.py` wiring listener + wakeword + stt together)
+* [DONE] Voice Engine loop (`voice/engine.py` — wires listener + wakeword + STT + speaker ID + TTS)
 
 ---
 
@@ -201,14 +200,26 @@ Allow NEXUS to recognize who is speaking.
 
 ### Tasks
 
-* [NOT STARTED] Research speaker embedding models
-* [NOT STARTED] Build voice dataset structure
-* [NOT STARTED] Record owner voice samples
-* [NOT STARTED] Build speaker profile database
-* [NOT STARTED] Train speaker recognition module
-* [NOT STARTED] Add confidence scoring
-* [NOT STARTED] Add unknown speaker detection
+* [DONE] Research speaker embedding models (SpeechBrain ECAPA-TDNN selected)
+* [DONE] Build voice dataset structure (`data/speaker_profiles/`)
+* [DONE] Record owner voice samples (via `MicrophoneListener.capture_phrase()`)
+* [DONE] Build speaker profile database (`SpeakerProfile` class — saves mean embedding as `.npy`)
+* [DONE] Train speaker recognition module (ECAPA-TDNN from `speechbrain/spkrec-ecapa-voxceleb` — downloaded & cached)
+* [DONE] Add confidence scoring (cosine similarity score returned with every `VerificationResult`)
+* [DONE] Add unknown speaker detection (`SpeakerIdentifier.verify()` — rejects below threshold)
 * [NOT STARTED] Add distance estimation using audio levels
+
+### Completed Speaker ID Sub-Components
+
+* [DONE] `SpeakerEmbedder` — wraps ECAPA-TDNN, extracts 192-dim L2-normalized embeddings
+* [DONE] `SpeakerProfile` — saves/loads owner embedding, `is_enrolled()` check
+* [DONE] `SpeakerIdentifier` — full enroll/verify flow with threshold control
+* [DONE] `VerificationResult` — structured result object with `.accepted`, `.score`, `.reason`
+* [DONE] Interactive enrollment CLI (`--enroll`) — records N mic samples, averages embeddings
+* [DONE] File verification CLI (`--verify audio.wav`)
+* [DONE] Live mic test CLI (`--test`)
+* [DONE] Wired into `VoiceEngine._main_loop()` — speaker verified after capture, before transcription
+* [DONE] Graceful fallback — if speechbrain missing, engine still runs with `speaker_id = None`
 
 ---
 
@@ -395,25 +406,57 @@ Prevent unauthorized access and unsafe actions.
 NEXUS/
 │
 ├── core/
-│   └── config.py           # Schema-validated JSON config system
+│   ├── logger.py            # Centralized logging — color terminal + rotating file
+│   ├── config.py            # Schema-validated JSON config with dot-path API
+│   ├── brain.py             # Brain orchestrator (memory + intent + reasoning)
+│   ├── intent_engine.py     # Rule-based + LLM intent classifier
+│   ├── dispatcher.py        # Maps intents to system actions
+│   ├── planner.py           # Task planning layer
+│   ├── reasoning.py         # Reasoning pipeline
+│   ├── memory.py            # Short + long-term memory manager
+│   └── conversation.py      # Conversation engine (Ollama/Mistral)
+│
 ├── voice/
-│   └── listener.py          # Microphone capture layer with VAD
-├── vision/
+│   ├── listener.py          # Microphone capture, VAD, phrase detection
+│   ├── wakeword.py          # Custom ONNX wake word detector (hey_nexus.onnx)
+│   ├── speech_to_text.py    # faster-whisper transcription
+│   ├── tts.py               # Text-to-speech (espeak backend)
+│   ├── engine.py            # Voice orchestration loop
+│   └── speaker_id.py        # Speaker identification (SpeechBrain ECAPA-TDNN)
+│
 ├── models/
-├── memory/
-├── cyber/
-├── automation/
-├── interface/
-├── plugins/
-├── logs/
+│   ├── wakeword/
+│   │   └── hey_nexus.onnx       # Custom trained wake word model (26.7 KB, self-contained)
+│   └── speaker_id/          # Cached SpeechBrain ECAPA-TDNN weights
+│
 ├── data/
+│   ├── wakeword/
+│   │   ├── hey_nexus/           # 100 positive WAV samples
+│   │   └── negative/            # 100 negative WAV samples
+│   ├── speaker_profiles/
+│   │   └── owner.npy            # Owner speaker embedding (192-dim)
+│   └── memory.log           # Flat-file memory log
+│
+├── tools/
+│   ├── record_wakeword.py   # Interactive wake word sample recorder
+│   └── train_wakeword.py    # CNN trainer → ONNX exporter
+│
 ├── config/
 │   └── settings.json        # Runtime configuration file
+│
+├── logs/
+│   └── nexus.log            # Rotating log file (DEBUG level)
+│
+├── vision/                  # [NOT STARTED]
+├── cyber/                   # [NOT STARTED]
+├── memory/                  # [NOT STARTED]
+├── automation/              # [NOT STARTED]
+├── plugins/                 # [NOT STARTED]
 ├── tests/
 ├── docs/
 │
-├── main.py                  # CLI launcher, banner, command parser, REPL
-├── requirements.txt         # Python dependencies
+├── main.py                  # CLI launcher, banner, REPL, command parser
+├── requirements.txt
 ├── README.md                # This file — master project tracker
 └── roadmap.md
 ```
@@ -440,9 +483,11 @@ The first working version of NEXUS should be able to:
 
 * [DONE] Planning architecture
 * [DONE] Development environment setup (Python venv, Linux, VS Code)
-* [DONE] Initial coding phase (main.py, core/config.py, voice/listener.py)
-* [DONE] Voice pipeline implementation (microphone ✅, wake word ✅, STT ✅, engine ✅)
-* [NOT STARTED] Model integration
+* [DONE] Initial coding phase (main.py, core/logger.py, core/config.py, voice/listener.py)
+* [DONE] Voice pipeline implementation (microphone ✅, wake word ✅, STT ✅, TTS ✅, engine ✅)
+* [DONE] Custom wake word model — trained locally, 100% val accuracy, live detection confirmed
+* [DONE] Speaker identification system — ECAPA-TDNN enrolled, wired into voice engine
+* [IN PROGRESS] Brain / reasoning / memory integration (Ollama/Mistral via `core/brain.py`)
 
 ---
 
@@ -453,4 +498,3 @@ NEXUS is intended to evolve continuously.
 The system architecture, modules, models, and workflows are expected to expand over time.
 
 Every contributor or future developer working on NEXUS must maintain documentation discipline and update this roadmap accordingly.
-# Nexus
