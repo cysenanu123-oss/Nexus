@@ -51,6 +51,15 @@ class Brain:
         self.reasoning  = ReasoningEngine()
         self.planner    = Planner()
         self.dispatcher = Dispatcher()
+        
+        try:
+            from vision.vision import Vision
+            self.vision = Vision()
+            log.info("Vision system ready.")
+        except Exception as e:
+            self.vision = None
+            log.warning(f"Vision unavailable: {e}")
+
         self.convo      = ConversationEngine(
             context=self.context,
             memory=self.memory,
@@ -137,6 +146,13 @@ class Brain:
         # ── Needs clarification ───────────────────────────────────────────
         if decision.type == DecisionType.CLARIFY:
             return decision.needs_clarification or "Could you rephrase that?"
+
+        # ── Screen queries ────────────────────────────────────────────
+        if self.vision and any(w in text.lower() for w in [
+            "what's on screen", "what is on screen", "read the screen",
+            "what do you see", "is there an error", "screen"
+        ]):
+            return self.vision.answer_about_screen(text)
 
         # ── Conversation (default) ────────────────────────────────────────
         return self.convo.respond(text)
