@@ -116,7 +116,7 @@ Build the core environment and architecture of NEXUS.
 
 * [DONE] Install Python environment
 * [DONE] Install VS Code extensions
-* [NOT STARTED] Create GitHub repository
+* [DONE] Create GitHub repository
 * [DONE] Create project folder structure
 * [DONE] Setup virtual environment (`nexus_env`)
 * [NOT STARTED] Install PyTorch
@@ -231,13 +231,21 @@ Allow NEXUS to view and understand screen activity.
 
 ### Tasks
 
-* [NOT STARTED] Setup screen capture system
-* [NOT STARTED] Build OCR pipeline
-* [NOT STARTED] Add live screen monitoring
+* [DONE] Setup screen capture system (`vision/capture.py` using `mss`)
+* [DONE] Build OCR pipeline (`vision/ocr.py` using `pytesseract`)
+* [DONE] Add live screen monitoring (`vision/monitor.py` for change detection)
 * [NOT STARTED] Add coding-window detection
 * [NOT STARTED] Add object detection system
 * [NOT STARTED] Add UI understanding
 * [NOT STARTED] Add screenshot memory system
+
+### Completed Vision Sub-Components
+
+* [DONE] `ScreenCapturer` — fast, multi-monitor screenshot capture
+* [DONE] `OCREngine` — extracts text from screenshots with confidence scoring
+* [DONE] Image pre-processing (contrast/sharpness/thresholding) for better OCR
+* [DONE] `ScreenMonitor` — background thread detecting screen changes & specific text
+* [DONE] `ScreenEvent` — fired when screen changes or text is found/lost
 
 ---
 
@@ -447,7 +455,10 @@ NEXUS/
 ├── logs/
 │   └── nexus.log            # Rotating log file (DEBUG level)
 │
-├── vision/                  # [NOT STARTED]
+├── vision/
+│   ├── capture.py           # Fast multi-monitor screen capture (MSS)
+│   ├── ocr.py               # Text extraction from screenshots (Tesseract)
+│   └── monitor.py           # Live screen change & text detection
 ├── cyber/                   # [NOT STARTED]
 ├── memory/                  # [NOT STARTED]
 ├── automation/              # [NOT STARTED]
