@@ -75,6 +75,7 @@ class VoiceEngine:
 
         self.detector = WakeWordDetector(
             wake_phrase=self.wake_phrase,
+            model_path="models/wakeword/hey_nexus.onnx",
             listener=self.listener
         )
 
