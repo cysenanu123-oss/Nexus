@@ -62,21 +62,8 @@ I'm still learning to do more."""
 
 
 # ─────────────────────────────────────────────
-# Ollama integration (optional, for real convo)
+# Removed unused _ollama_chat function
 # ─────────────────────────────────────────────
-
-def _ollama_chat(prompt: str, history: list[dict],
-                 model: str = "mistral") -> Optional[str]:
-    try:
-        import ollama  # type: ignore
-        messages = history + [{"role": "user", "content": prompt}]
-        response = ollama.chat(model=model, messages=messages)
-        return response["message"]["content"].strip()
-    except ImportError:
-        return None
-    except Exception as e:
-        log.warning(f"Ollama failed: {e}")
-        return None
 
 
 # ─────────────────────────────────────────────
@@ -160,22 +147,30 @@ class ConversationEngine:
         if not self.use_llm:
             return None
 
-        # Build minimal history for context
-        history = []
-        for turn in self.context.recent_turns(6):
-            role = "user" if turn.role == "user" else "assistant"
-            history.append({"role": role, "content": turn.text})
+        try:
+            from core.llm import get_llm
+            llm = get_llm()
+            if not llm.is_ready:
+                return None
 
-        system = (
-            "You are NEXUS, a smart, concise, no-nonsense AI assistant "
-            f"built for {self.context.user_name}. "
-            "You are running locally on their Linux machine. "
-            "You help with cybersecurity, coding, and general tasks. "
-            "Keep replies short and direct. Never be sycophantic."
-        )
+            # Build minimal history for context
+            history = []
+            for turn in self.context.recent_turns(6):
+                role = "user" if turn.role == "user" else "assistant"
+                history.append({"role": role, "content": turn.text})
 
-        full_history = [{"role": "system", "content": system}] + history
-        return _ollama_chat(text, full_history, self.llm_model)
+            system = (
+                "You are NEXUS, a smart, concise, no-nonsense AI assistant "
+                f"built for {self.context.user_name}. "
+                "You are running locally on their Linux machine. "
+                "You help with cybersecurity, coding, and general tasks. "
+                "Keep replies short and direct. Never be sycophantic."
+            )
+            
+            return llm.chat(text, system=system, history=history)
+        except Exception as e:
+            log.warning(f"LLM integration failed: {e}")
+            return None
 
     # ── Public API ───────────────────────────────────────────────────────
 

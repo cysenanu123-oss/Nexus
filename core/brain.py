@@ -25,6 +25,8 @@ from core.context        import Context
 from core.reasoning      import ReasoningEngine, DecisionType
 from core.planner        import Planner
 from core.conversation   import ConversationEngine
+from core.llm import LLM
+from core.coding_assistant import CodingAssistant
 
 log = logging.getLogger("nexus.brain")
 
@@ -52,10 +54,28 @@ class Brain:
         self.planner    = Planner()
         self.dispatcher = Dispatcher()
         
+        # LLM
         try:
+            self.llm = LLM()
+            log.info(f"LLM ready — models: {self.llm.available_models()}")
+        except Exception as e:
+            self.llm = None
+            log.warning(f"LLM unavailable: {e}")
+
+        # Coding assistant
+        try:
+            self.coder = CodingAssistant()
+        except Exception as e:
+            self.coder = None
+            log.warning(f"Coding assistant unavailable: {e}")
+
+        # Vision
+        try:
+            import sys as _sys, os as _os
+            _sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
             from vision.vision import Vision
             self.vision = Vision()
-            log.info("Vision system ready.")
+            log.info("Vision ready.")
         except Exception as e:
             self.vision = None
             log.warning(f"Vision unavailable: {e}")
@@ -150,9 +170,30 @@ class Brain:
         # ── Screen queries ────────────────────────────────────────────
         if self.vision and any(w in text.lower() for w in [
             "what's on screen", "what is on screen", "read the screen",
-            "what do you see", "is there an error", "screen"
+            "what do you see", "what can you see", "is there an error", 
+            "screen", "scrren", "see on"
         ]):
             return self.vision.answer_about_screen(text)
+
+        # ── Coding assistant ──────────────────────────────────────────
+        coding_triggers = [
+            "explain", "fix", "debug", "what does this", "how do i",
+            "write a function", "write code", "help me code",
+            "what's wrong with", "refactor", "improve this code",
+            "explain this code", "document this",
+        ]
+        if self.coder and any(t in text.lower() for t in coding_triggers):
+            # Check if there's code on screen to work with
+            if any(t in text.lower() for t in ["on screen", "this code", "explain this", "fix this"]):
+                return self.coder.explain_screen() if "explain" in text.lower() else self.coder.fix_screen()
+            return self.coder.ask(text)
+
+        # ── Direct LLM conversation ───────────────────────────────────
+        if self.llm and self.llm.is_ready:
+            # Upgrade conversation engine to use real LLM
+            # (ConversationEngine already calls Ollama if available,
+            #  but this is the explicit fallback for complex questions)
+            pass  # ConversationEngine handles this via _llm_response
 
         # ── Conversation (default) ────────────────────────────────────────
         return self.convo.respond(text)

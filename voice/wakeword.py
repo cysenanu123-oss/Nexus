@@ -123,10 +123,19 @@ class WakeWordDetector:
         window = np.zeros(SAMPLE_RATE, dtype=np.float32)
 
         while True:
+            # Check if we should stop
+            if not self._running:
+                break
+                
             # Use shared listener (no new mic stream opened)
             if listener is not None:
+                # If the listener was explicitly stopped, break to avoid infinite loop
+                if not getattr(listener, "_running", True):
+                    break
                 chunk_int16 = listener.read_chunk(timeout=1.0)
                 if chunk_int16 is None:
+                    # Give up some CPU before continuing
+                    time.sleep(0.01)
                     continue
                 chunk = chunk_int16.astype(np.float32) / 32768.0
                 if listener._capture_rate != SAMPLE_RATE:

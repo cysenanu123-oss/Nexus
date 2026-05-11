@@ -69,7 +69,7 @@ PROFILE_DIR       = Path("data/speaker_profiles")
 OWNER_PROFILE     = PROFILE_DIR / "owner.npy"
 ENROLL_SAMPLES    = 10         # number of voice samples to record during enrollment
 ENROLL_SEC        = 6.0        # seconds per enrollment sample
-VERIFY_THRESHOLD  = 0.40       # cosine similarity — above = accepted
+VERIFY_THRESHOLD  = 0.30       # cosine similarity — above = accepted
 MODEL_SOURCE      = "speechbrain/spkrec-ecapa-voxceleb"
 MODEL_SAVE_DIR    = "models/speaker_id"
 
