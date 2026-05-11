@@ -69,6 +69,15 @@ class Brain:
             self.coder = None
             log.warning(f"Coding assistant unavailable: {e}")
 
+        # Research module
+        try:
+            from research.researcher import Researcher
+            self.researcher = Researcher(max_sources=3)
+            log.info("Researcher ready.")
+        except Exception as e:
+            self.researcher = None
+            log.warning(f"Researcher unavailable: {e}")
+
         # Vision
         try:
             import sys as _sys, os as _os
@@ -166,6 +175,31 @@ class Brain:
         # ── Needs clarification ───────────────────────────────────────────
         if decision.type == DecisionType.CLARIFY:
             return decision.needs_clarification or "Could you rephrase that?"
+
+        # ── Research intent ───────────────────────────────────────
+        research_triggers = [
+            "research", "look up", "find out about", "what is",
+            "explain", "tell me about", "learn about",
+            "search for", "who is", "how does", "why does",
+            "read this url", "fetch this", "summarize this url",
+        ]
+        if self.researcher and intent.intent in (
+            "research_topic", "search_web", "ask_question"
+        ) and any(t in text.lower() for t in research_triggers):
+            # Check if it's a URL read request
+            if any(t in text.lower() for t in ["read url", "fetch url", "summarize url", "learn from"]):
+                import re
+                url_match = re.search(r"https?://\S+", text)
+                if url_match:
+                    return self.researcher.learn_from_url(url_match.group(0))
+
+            return self.researcher.answer(text)
+
+        # ── recall from research memory ────────────────────────────
+        if self.researcher and intent.intent in ("recall", "memory_query") and (
+            "research" in text.lower() or "what did you learn" in text.lower()
+        ):
+            return self.researcher.recall(text)
 
         # ── Screen queries ────────────────────────────────────────────
         if self.vision and any(w in text.lower() for w in [

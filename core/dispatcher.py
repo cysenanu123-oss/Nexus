@@ -381,6 +381,37 @@ def _handle_unknown(intent: Intent) -> ActionResult:
     )
 
 
+def _handle_research_topic(intent: Intent) -> ActionResult:
+    """Research a topic using the NEXUS research pipeline."""
+    query = intent.query or intent.target or intent.raw or ""
+    if not query:
+        return ActionResult(False, "What should I research?")
+
+    try:
+        from research.researcher import Researcher
+        r = Researcher(max_sources=3)
+        report = r.research(query)
+        if report.success:
+            return ActionResult(True, report.synthesis or report.summaries[0].text)
+        return ActionResult(False, f"Research failed: {report.error}")
+    except Exception as e:
+        return ActionResult(False, f"Research module error: {e}")
+
+
+def _handle_recall_research(intent: Intent) -> ActionResult:
+    """Recall from research memory."""
+    query = intent.query or intent.target or ""
+    if not query:
+        return ActionResult(False, "What do you want me to recall?")
+
+    try:
+        from research.researcher import Researcher
+        r = Researcher(max_sources=3)
+        return ActionResult(True, r.recall(query))
+    except Exception as e:
+        return ActionResult(False, f"Recall failed: {e}")
+
+
 # ─────────────────────────────────────────────
 # Dispatch table
 # Maps intent name → handler function
@@ -400,6 +431,9 @@ DISPATCH_TABLE = {
     "recall":            _handle_recall,
     "greet":             _handle_greet,
     "farewell":          _handle_farewell,
+    "research_topic":  _handle_research_topic,
+    "recall_research": _handle_recall_research,
+    "read_url":        _handle_research_topic,   # reuse — researcher handles URLs too
 }
 
 

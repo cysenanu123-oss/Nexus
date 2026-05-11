@@ -127,6 +127,15 @@ RULES: list[tuple[str, re.Pattern, str]] = [
      re.compile(r"^(?:bye|goodbye|exit|quit|stop|see\s+you|later)", re.I),
      None),
 
+    # ── Research ──────────────────────────────────────────────────────────
+    ("research_topic",
+     re.compile(r"(?:research|study|learn about|look up|find out about)\s+(?P<query>.+)$", re.I),
+     "research"),
+
+    ("read_url",
+     re.compile(r"(?:read|fetch|summarize|learn from)\s+(?:url\s+|this\s+)?(?P<target>https?://\S+)", re.I),
+     "read"),
+
     ("ask_question",
      re.compile(r"^(?:what|who|when|where|why|how|can you|could you|tell me)\b(?P<query>.+)?$", re.I),
      "answer"),
