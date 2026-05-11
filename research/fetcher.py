@@ -17,7 +17,7 @@ Pipeline:
 Usage:
     from research.fetcher import PageFetcher
     f = PageFetcher()
-    page = f.fetch("https://en.wikipedia.org/wiki/Buffer_overflow")
+    page = f.fetch("https://owasp.org/www-community/attacks/SQL_Injection")
     print(page.text[:500])
 """
 
@@ -48,9 +48,9 @@ except ImportError:
 #  CONFIG
 # ─────────────────────────────────────────────────────────────
 
-FETCH_TIMEOUT     = 12          # seconds
+FETCH_TIMEOUT     = 15          # seconds
 MAX_TEXT_CHARS    = 12_000      # truncate page text beyond this
-MIN_TEXT_CHARS    = 100         # ignore pages with less than this
+MIN_TEXT_CHARS    = 80          # lowered — some good pages are terse
 
 HEADERS = {
     "User-Agent": (
@@ -61,20 +61,45 @@ HEADERS = {
     "Accept-Language": "en-US,en;q=0.9",
 }
 
-# Tags to strip entirely (no content needed)
+# Tags that are definitely junk — safe to remove entirely
 TAGS_TO_STRIP = {
-    "script", "style", "noscript", "nav", "footer", "header",
-    "aside", "form", "button", "input", "select", "textarea",
-    "iframe", "advertisement", "figure", "figcaption",
-    "cookie", "popup", "banner", "sidebar",
+    "script", "style", "noscript", "iframe",
+    "button", "input", "select", "textarea",
 }
 
-# CSS classes/IDs that typically contain junk
+# Class/ID patterns for clearly junk containers
+# Kept intentionally narrow — don't over-strip
 JUNK_PATTERNS = re.compile(
-    r"(nav|menu|footer|header|sidebar|cookie|banner|ad-|ads-|advert|popup|"
-    r"subscribe|newsletter|social|share|comment|related|recommend)",
+    r"\b(cookie-?banner|cookie-?notice|gdpr|newsletter-?signup|"
+    r"social-?share|share-?buttons?|modal|overlay|"
+    r"ads?-?container|advertisement|sidebar-?ad)\b",
     re.I,
 )
+
+# Selectors tried in order for main content — most specific first
+CONTENT_SELECTORS = [
+    "article",
+    "main",
+    "[role='main']",
+    ".post-body",
+    ".post-content",
+    ".article-body",
+    ".article-content",
+    ".entry-content",
+    ".content-body",
+    ".page-content",
+    ".wiki-content",
+    ".markdown-body",        # GitHub
+    ".prose",                # Tailwind/OWASP
+    "#content article",
+    "#content",
+    "#main-content",
+    "#main",
+    ".main-content",
+    ".container article",
+    ".container",
+    "body",                  # absolute fallback
+]
 
 
 # ─────────────────────────────────────────────────────────────
@@ -98,7 +123,6 @@ class FetchedPage:
 
     @property
     def snippet(self) -> str:
-        """First 300 characters of text."""
         return self.text[:300].strip()
 
     def __str__(self) -> str:
@@ -119,18 +143,18 @@ class PageFetcher:
     """
     Downloads web pages and extracts clean readable text.
 
-    Handles:
-        - HTML stripping and boilerplate removal
-        - Character encoding issues
-        - Timeouts and error recovery
-        - Multiple URLs in batch
+    Strategy:
+        1. Strip definitely-junk tags (scripts, styles, iframes)
+        2. Remove clearly junk containers by class/ID pattern
+        3. Walk CONTENT_SELECTORS to find the richest content block
+        4. If nothing qualifies, use full body text (no false negatives)
+        5. Clean whitespace and remove navigation fragments
 
     Usage:
         fetcher = PageFetcher()
-        page = fetcher.fetch("https://docs.python.org/3/library/subprocess.html")
+        page = fetcher.fetch("https://owasp.org/www-community/attacks/SQL_Injection")
         print(page.text)
 
-        # Batch fetch
         pages = fetcher.fetch_many(["https://...", "https://..."])
     """
 
@@ -150,11 +174,7 @@ class PageFetcher:
     # ── public API ────────────────────────────────────────────
 
     def fetch(self, url: str) -> FetchedPage:
-        """
-        Download and clean one page.
-
-        Returns FetchedPage — always (check .success for errors).
-        """
+        """Download and clean one page."""
         log.info("Fetching: %s", url)
         t0 = time.time()
 
@@ -169,7 +189,6 @@ class PageFetcher:
         except Exception as e:
             return FetchedPage(url=url, error=str(e))
 
-        # Parse
         try:
             page = self._parse(resp.text, url)
             page.status  = status
@@ -184,7 +203,7 @@ class PageFetcher:
                 url, page.word_count, page.elapsed,
             )
         else:
-            log.warning("Fetch yielded no usable content: %s", url)
+            log.warning("Fetch yielded no usable content: %s  error=%r", url, page.error)
 
         return page
 
@@ -194,19 +213,7 @@ class PageFetcher:
         delay: float = 0.8,
         max_pages: int = 5,
     ) -> list[FetchedPage]:
-        """
-        Fetch multiple pages with a polite delay.
-
-        Parameters
-        ----------
-        urls      : list of URLs
-        delay     : seconds between requests
-        max_pages : cap on total pages fetched
-
-        Returns
-        -------
-        List of FetchedPage (successful fetches only)
-        """
+        """Fetch multiple pages with a polite delay. Returns successful fetches only."""
         pages = []
         for url in urls[:max_pages]:
             page = self.fetch(url)
@@ -216,60 +223,48 @@ class PageFetcher:
                 time.sleep(delay)
         return pages
 
-    # ── HTML parsing & cleaning ───────────────────────────────
+    # ── HTML parsing ──────────────────────────────────────────
 
     def _parse(self, html: str, url: str) -> FetchedPage:
         """Extract clean text from raw HTML."""
         soup = BeautifulSoup(html, "html.parser")
 
-        # Extract title
+        # Title
         title_tag = soup.find("title")
         title     = title_tag.get_text(strip=True) if title_tag else ""
 
-        # Remove HTML comments
-        for comment in soup.find_all(string=lambda t: isinstance(t, Comment)):
-            comment.extract()
+        # 1. Remove HTML comments
+        for c in soup.find_all(string=lambda t: isinstance(t, Comment)):
+            c.extract()
 
-        # Remove junk tags entirely
+        # 2. Strip definitely-junk tags (non-content)
         for tag_name in TAGS_TO_STRIP:
             for tag in soup.find_all(tag_name):
                 tag.decompose()
 
-        SAFE_TAGS = {"html", "body", "main", "article"}
-
-        # Remove elements with junk class/id patterns
+        # 3. Remove containers whose class/id screams "junk"
+        #    (narrow pattern — only obvious ad/cookie/modal wrappers)
         for tag in soup.find_all(True):
-            if tag.name in SAFE_TAGS:
-                continue
-            if tag.attrs is None:
-                continue
-            
-            c = tag.get("class", [])
-            classes = " ".join(c) if isinstance(c, list) else str(c)
-            
-            tag_id = tag.get("id", "")
-            tag_id = " ".join(tag_id) if isinstance(tag_id, list) else str(tag_id)
-            
-            combined = (classes + " " + tag_id).lower()
-            if "content" in combined or "main" in combined:
-                continue
-                
-            if JUNK_PATTERNS.search(classes) or JUNK_PATTERNS.search(tag_id):
+            attrs = " ".join(
+                tag.get("class", []) + [tag.get("id", "")]
+            )
+            if JUNK_PATTERNS.search(attrs):
                 tag.decompose()
 
-        # Try to find the main content area
-        content = self._find_main_content(soup)
+        # 4. Find best content block
+        content_tag = self._find_main_content(soup)
+        raw_text    = content_tag.get_text(separator="\n", strip=True)
 
-        # Extract text
-        raw_text = content.get_text(separator="\n", strip=True)
-
-        # Clean up excessive whitespace
+        # 5. Clean the text
         text = self._clean_text(raw_text)
-
-        # Truncate
         text = text[:self.max_chars]
 
-        if len(text) < MIN_TEXT_CHARS:
+        if len(text.strip()) < MIN_TEXT_CHARS:
+            # Last resort: pull ALL text from soup (ignore structure entirely)
+            text = self._clean_text(soup.get_text(separator="\n", strip=True))
+            text = text[:self.max_chars]
+
+        if len(text.strip()) < MIN_TEXT_CHARS:
             return FetchedPage(url=url, title=title, error="Page too short or no content")
 
         return FetchedPage(
@@ -280,43 +275,46 @@ class PageFetcher:
         )
 
     def _find_main_content(self, soup: "BeautifulSoup"):
-        """Try to locate the main content container."""
-        # Priority order: semantic HTML5 > common class patterns > body
-        selectors = [
-            "article",
-            "main",
-            "[role='main']",
-            ".article-body",
-            ".post-content",
-            ".entry-content",
-            ".content-body",
-            "#content",
-            "#main",
-            ".main-content",
-        ]
-        for sel in selectors:
-            tag = soup.select_one(sel)
-            if tag and len(tag.get_text(strip=True)) > MIN_TEXT_CHARS:
+        """
+        Walk CONTENT_SELECTORS and return the first tag that contains
+        a meaningful amount of text. Falls back to <body>, then full soup.
+        """
+        for selector in CONTENT_SELECTORS:
+            try:
+                tag = soup.select_one(selector)
+            except Exception:
+                continue
+
+            if tag is None:
+                continue
+
+            text_len = len(tag.get_text(strip=True))
+            if text_len >= MIN_TEXT_CHARS:
+                log.debug("Content selector matched: %r (%d chars)", selector, text_len)
                 return tag
 
-        # Fall back to body
-        body = soup.find("body")
-        return body if body else soup
+        # Nothing matched with sufficient text — use full soup
+        log.debug("No content selector matched — using full document.")
+        return soup
 
     def _clean_text(self, text: str) -> str:
-        """Normalize whitespace and remove garbage lines."""
+        """Normalize whitespace and drop navigation-style fragments."""
         lines = []
         for line in text.splitlines():
             line = line.strip()
-            # Skip very short lines (navigation fragments, single words)
-            if len(line) < 4:
+            if not line:
                 continue
-            # Skip lines that are just numbers or symbols
-            if re.match(r"^[\d\s\W]{1,10}$", line):
+            # Skip lines that are purely numeric/symbolic (page numbers, bullets)
+            if re.match(r"^[\d\s\W]{1,6}$", line):
                 continue
+            # Skip very short lines that look like menu items (< 3 words)
+            words = line.split()
+            if len(words) < 3 and len(line) < 20:
+                # Keep if it looks like a heading (title-case or ALL CAPS)
+                if not (line.istitle() or line.isupper()):
+                    continue
             lines.append(line)
 
-        # Collapse multiple blank lines
         result = "\n".join(lines)
         result = re.sub(r"\n{3,}", "\n\n", result)
         return result.strip()
@@ -330,7 +328,8 @@ if __name__ == "__main__":
     import sys
     logging.basicConfig(level=logging.INFO)
 
-    url = sys.argv[1] if len(sys.argv) > 1 else "https://en.wikipedia.org/wiki/Buffer_overflow"
+    url = sys.argv[1] if len(sys.argv) > 1 else \
+        "https://owasp.org/www-community/attacks/SQL_Injection"
     print(f"\n  Fetching: {url}\n")
 
     fetcher = PageFetcher()

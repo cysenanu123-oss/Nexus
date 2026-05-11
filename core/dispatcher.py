@@ -115,6 +115,8 @@ SAFE_COMMANDS: set[str] = {
     "cat", "echo", "date", "cal",
     "git", "python3", "pip3",
     "nmap", "netstat", "ss", "curl", "wget",
+    "hydra", "msfconsole", "sqlmap", "gobuster",
+    "wpscan", "john", "hashcat", "aircrack-ng"
 }
 
 

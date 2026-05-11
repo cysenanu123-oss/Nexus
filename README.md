@@ -125,7 +125,7 @@ Build the core environment and architecture of NEXUS.
 * [DONE] Create terminal ASCII intro banner (animated NEXUS banner with version bar)
 * [DONE] Create logging system (Python `logging` module, configurable via `core/config.py`)
 * [DONE] Create configuration file system (`core/config.py` — schema-validated JSON config with dot-path API)
-* [NOT STARTED] Create modular plugin architecture
+* [DONE] Create modular plugin architecture (`core/plugins.py` — auto-loading dynamic plugin manager)
 
 ---
 
@@ -292,11 +292,11 @@ Allow NEXUS to improve over time.
 
 ### Tasks
 
-* [NOT STARTED] Create research collection system
-* [NOT STARTED] Add document ingestion pipeline
-* [NOT STARTED] Build vector memory database
-* [NOT STARTED] Add knowledge indexing
-* [NOT STARTED] Add autonomous summarization
+* [DONE] Create research collection system (`research/searcher.py` and `research/researcher.py`)
+* [DONE] Add document ingestion pipeline (`research/fetcher.py`)
+* [DONE] Build vector memory database (`research/memory.py` using ChromaDB)
+* [DONE] Add knowledge indexing
+* [DONE] Add autonomous summarization (`research/summarizer.py` using local LLMs)
 * [NOT STARTED] Add learning feedback loop
 * [NOT STARTED] Add long-term memory architecture
 
@@ -422,7 +422,8 @@ NEXUS/
 │   ├── planner.py           # Task planning layer
 │   ├── reasoning.py         # Reasoning pipeline
 │   ├── memory.py            # Short + long-term memory manager
-│   └── conversation.py      # Conversation engine (Ollama/Mistral)
+│   ├── conversation.py      # Conversation engine (Ollama/Mistral)
+│   └── plugins.py           # Plugin Architecture and Manager
 │
 ├── voice/
 │   ├── listener.py          # Microphone capture, VAD, phrase detection
@@ -459,10 +460,16 @@ NEXUS/
 │   ├── capture.py           # Fast multi-monitor screen capture (MSS)
 │   ├── ocr.py               # Text extraction from screenshots (Tesseract)
 │   └── monitor.py           # Live screen change & text detection
+├── research/
+│   ├── researcher.py        # Autonomous research pipeline coordinator
+│   ├── searcher.py          # Web search module
+│   ├── fetcher.py           # Web page downloading and HTML parsing
+│   ├── summarizer.py        # Page summarization using local LLM
+│   └── memory.py            # Vector database (ChromaDB) for research retention
+├── plugins/                 # Modular plugin directory for extensions
 ├── cyber/                   # [NOT STARTED]
 ├── memory/                  # [NOT STARTED]
 ├── automation/              # [NOT STARTED]
-├── plugins/                 # [NOT STARTED]
 ├── tests/
 ├── docs/
 │
