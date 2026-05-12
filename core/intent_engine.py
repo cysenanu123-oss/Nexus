@@ -48,38 +48,38 @@ RULES: list[tuple[str, re.Pattern, str]] = [
 
     # ── Applications ──────────────────────────────────────────────────────
     ("open_application",
-     re.compile(r"(?:open|launch|start|run|execute)\s+(?P<target>\w[\w\s-]*)$", re.I),
+     re.compile(r"^(?:open|launch|start|run|execute)\s+(?P<target>\w[\w\s-]*)$", re.I),
      "open"),
 
     ("close_application",
-     re.compile(r"(?:close|quit|kill|exit)\s+(?P<target>\w[\w\s-]*)$", re.I),
+     re.compile(r"^(?:close|quit|kill|exit)\s+(?P<target>\w[\w\s-]*)$", re.I),
      "close"),
 
     # ── Files & folders ───────────────────────────────────────────────────
     ("open_file",
-     re.compile(r"(?:open|show|read)\s+(?:file\s+)?(?P<target>[\w./~\-]+\.\w+)", re.I),
+     re.compile(r"^(?:open|show|read)\s+(?:file\s+)?(?P<target>[\w./~\-]+\.\w+)", re.I),
      "open"),
 
     ("open_folder",
-     re.compile(r"(?:open|go to|navigate to)\s+(?:folder|directory|dir)\s+(?P<target>[\w./~\-]+)", re.I),
+     re.compile(r"^(?:open|go to|navigate to)\s+(?:folder|directory|dir)\s+(?P<target>[\w./~\-]+)", re.I),
      "open"),
 
     ("list_files",
-     re.compile(r"(?:list|show|ls)\s+(?:files|contents?)(?:\s+(?:in|of|at)\s+(?P<target>[\w./~\-]+))?", re.I),
+     re.compile(r"^(?:list|show|ls)\s+(?:files|contents?)(?:\s+(?:in|of|at)\s+(?P<target>[\w./~\-]+))?", re.I),
      "list"),
 
     # ── Web / Browser ─────────────────────────────────────────────────────
     ("search_web",
-     re.compile(r"(?:search|google|look up|find)\s+(?:for\s+)?(?P<query>.+)$", re.I),
+     re.compile(r"^(?:search|google|look up|find)\s+(?:for\s+)?(?P<query>.+)$", re.I),
      "search"),
 
     ("open_url",
-     re.compile(r"(?:open|go to|visit|navigate to)\s+(?P<target>https?://\S+|www\.\S+|\w+\.\w{2,})", re.I),
+     re.compile(r"^(?:open|go to|visit|navigate to)\s+(?P<target>https?://\S+|www\.\S+|\w+\.\w{2,})", re.I),
      "open"),
 
     # ── System controls ───────────────────────────────────────────────────
     ("system_control",
-     re.compile(r"(?P<action>shutdown|reboot|restart|lock|sleep|hibernate|log ?out)\s*(?:the\s+)?(?:system|computer|machine|laptop|pc)?$", re.I),
+     re.compile(r"^(?P<action>shutdown|reboot|restart|lock|sleep|hibernate|log ?out)\s*(?:the\s+)?(?:system|computer|machine|laptop|pc)?$", re.I),
      None),
 
     ("volume_control",
@@ -92,30 +92,119 @@ RULES: list[tuple[str, re.Pattern, str]] = [
 
     # ── Shell / Terminal ──────────────────────────────────────────────────
     ("run_command",
-     re.compile(r"(?:run|execute|do)\s+(?:command\s+)?(?P<query>.+)$", re.I),
+     re.compile(r"^(?:run|execute|do)\s+(?:command\s+)?(?P<query>.+)$", re.I),
      "shell"),
 
     # ── Memory & notes ────────────────────────────────────────────────────
     ("remember",
-     re.compile(r"(?:remember|note|save|store)\s+(?:that\s+)?(?P<query>.+)$", re.I),
+     re.compile(r"^(?:remember|note|save|store)\s+(?:that\s+)?(?P<query>.+)$", re.I),
      "store"),
 
     ("recall",
-     re.compile(r"(?:what did i|recall|remind me|do you remember)\s+(?:about\s+)?(?P<query>.+)?$", re.I),
+     re.compile(r"^(?:what did i|recall|remind me|do you remember)\s+(?:about\s+)?(?P<query>.+)?$", re.I),
      "retrieve"),
 
-    # ── Cybersecurity ─────────────────────────────────────────────────────
+    # ── Cybersecurity — scanning ──────────────────────────────────────────
+    ("cyber_full_network_scan",
+     re.compile(r"^(?:scan my network|scan network|network scan|scan local network)", re.I),
+     "scan"),
+
+    ("cyber_discover_devices",
+     re.compile(r"(?:what devices|who is on|devices on|hosts on|find devices|discover hosts|who.?s on|what.?s on my network)", re.I),
+     "discover"),
+
+    # ── Cybersecurity — toolkit (must be before port scan to avoid false match) —
+    ("cyber_recommend_tool",
+     re.compile(r"(?:best tool for|recommend tool|which tool)\s+(?P<query>.+)?", re.I),
+     "recommend"),
+
+    ("cyber_port_scan",
+     re.compile(r"(?:open ports on|ports on|scan ports|check ports|port scan|what ports|scan host|scan ip)\s*(?:on\s+|at\s+|for\s+)?(?P<target>[\d.:/\w-]+)?", re.I),
+     "scan"),
+
+    ("cyber_quick_scan",
+     re.compile(r"(?:quick scan|fast scan)\s+(?P<target>[\d.:/\w-]+)", re.I),
+     "scan"),
+
+    ("cyber_full_scan",
+     re.compile(r"(?:full scan|deep scan|detailed scan|service scan)\s+(?P<target>[\d.:/\w-]+)", re.I),
+     "scan"),
+
+    ("cyber_stealth_scan",
+     re.compile(r"(?:stealth scan|silent scan|syn scan)\s+(?P<target>[\d.:/\w-]+)", re.I),
+     "scan"),
+
+    # ── Cybersecurity — network intel ─────────────────────────────────────
+    ("cyber_show_interfaces",
+     re.compile(r"(?:show interfaces|network interfaces|my ip|local ip|ip address|what is my ip|interface info)", re.I),
+     "query"),
+
+    ("cyber_external_ip",
+     re.compile(r"(?:external ip|public ip|my public ip|internet ip)", re.I),
+     "query"),
+
+    ("cyber_show_arp",
+     re.compile(r"(?:arp table|arp cache|local arp)", re.I),
+     "query"),
+
+    ("cyber_show_connections",
+     re.compile(r"(?:active connections|open connections|network connections|established connections)", re.I),
+     "query"),
+
+    ("cyber_show_routes",
+     re.compile(r"(?:routing table|ip routes|show routes)", re.I),
+     "query"),
+
+    ("cyber_show_subnet",
+     re.compile(r"(?:my subnet|local subnet|network range|cidr)", re.I),
+     "query"),
+
+    # ── Cybersecurity — log / threat analysis ─────────────────────────────
+    ("cyber_analyze_logs",
+     re.compile(r"(?:suspicious activity|check logs|analyze logs|security scan|intrusion|threats|attacks|log analysis|security report)", re.I),
+     "analyze"),
+
+    ("cyber_check_logins",
+     re.compile(r"(?:failed login|brute force|ssh attacks|login attempts)", re.I),
+     "analyze"),
+
+    ("cyber_check_processes",
+     re.compile(r"(?:suspicious process|malicious process|check processes)", re.I),
+     "analyze"),
+
+    ("cyber_active_sessions",
+     re.compile(r"(?:active sessions|who is logged|current users)", re.I),
+     "query"),
+
+    ("cyber_check_listening",
+     re.compile(r"(?:listening ports|open ports local|services running)", re.I),
+     "query"),
+
+    # ── Cybersecurity — toolkit ───────────────────────────────────────────
+    ("cyber_toolkit_status",
+     re.compile(r"(?:toolkit status|tool status|what tools|available tools|installed tools|show tools)", re.I),
+     "query"),
+
+    ("cyber_install_tool",
+     re.compile(r"^(?:install|download)\s+(?P<target>[\w\-]+)", re.I),
+     "install"),
+
+    ("cyber_help",
+     re.compile(r"^cyber help$|^what can nexus do.*cyber|^cyber commands", re.I),
+     "help"),
+
+    # ── Network scan (legacy / generic) ───────────────────────────────────
     ("network_scan",
-     re.compile(r"(?:scan|ping|probe)\s+(?:network|host|ip|target)?\s*(?P<target>[\d./\w-]+)?", re.I),
+     re.compile(r"^(?:scan|ping|probe)\s+(?:network|host|ip|target)?\s*(?P<target>[\d./\w-]+)?", re.I),
      "scan"),
 
     # ── Status / info ─────────────────────────────────────────────────────
     ("system_info",
-     re.compile(r"(?:system\s+)?(?:status|info|information|stats|resources|cpu|memory|ram|disk)", re.I),
+     re.compile(r"^(?:system\s+)?(?:status|info|information|stats|resources|cpu|memory|ram|disk)", re.I),
      "query"),
 
     ("get_time",
-     re.compile(r"(?:what(?:'s|\s+is)\s+the\s+)?(?:time|date|day|clock)", re.I),
+     re.compile(r"^(?:what(?:'s|\s+is)\s+the\s+)?(?:time|date|day|clock)", re.I),
      "query"),
 
     # ── Conversation / general ────────────────────────────────────────────
@@ -129,11 +218,11 @@ RULES: list[tuple[str, re.Pattern, str]] = [
 
     # ── Research ──────────────────────────────────────────────────────────
     ("research_topic",
-     re.compile(r"(?:research|study|learn about|look up|find out about)\s+(?P<query>.+)$", re.I),
+     re.compile(r"^(?:research|study|learn about|look up|find out about)\s+(?P<query>.+)$", re.I),
      "research"),
 
     ("read_url",
-     re.compile(r"(?:read|fetch|summarize|learn from)\s+(?:url\s+|this\s+)?(?P<target>https?://\S+)", re.I),
+     re.compile(r"^(?:read|fetch|summarize|learn from)\s+(?:url\s+|this\s+)?(?P<target>https?://\S+)", re.I),
      "read"),
 
     ("ask_question",

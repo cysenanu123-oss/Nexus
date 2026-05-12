@@ -267,7 +267,7 @@ MODULE_REGISTRY = {
     "llm":         {"status": "NOT STARTED", "desc": "Local LLM inference"},
     "memory":      {"status": "NOT STARTED", "desc": "Short & long-term memory"},
     "research":    {"status": "NOT STARTED", "desc": "Self-learning & research"},
-    "cyber":       {"status": "NOT STARTED", "desc": "Cybersecurity tools"},
+    "cyber":       {"status": "ACTIVE",      "desc": "Cybersecurity tools (scanner, network intel, log analyzer, toolkit)"},
     "coding":      {"status": "NOT STARTED", "desc": "Coding assistant"},
     "security":    {"status": "NOT STARTED", "desc": "Permissions & auth"},
 }

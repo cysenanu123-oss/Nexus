@@ -21,7 +21,8 @@ class Turn:
 class Context:
     """
     Live session context — resets every time NEXUS starts.
-    Tracks conversation history, active task, and current user focus.
+    Tracks conversation history, active task, current user focus,
+    and the last action output for follow-up questions.
     """
 
     def __init__(self, max_history: int = 20):
@@ -32,6 +33,27 @@ class Context:
         self.last_intent:  Optional[str] = None
         self.last_target:  Optional[str] = None
         self.session_start = time.time()
+
+        # ── Action output memory (for follow-up questions) ────────────────
+        self.last_output:        Optional[str] = None   # raw text from last action
+        self.last_output_domain: Optional[str] = None   # "cyber", "system", "research", "code"
+        self.last_output_time:   float         = 0.0    # when it was produced
+
+    # ── Output tracking ──────────────────────────────────────────────────
+
+    def set_last_output(self, output: str, domain: str):
+        """Store the output of the last action so follow-up questions can reference it."""
+        self.last_output        = output
+        self.last_output_domain = domain
+        self.last_output_time   = time.time()
+
+    def get_recent_output(self, max_age_seconds: int = 300) -> Optional[str]:
+        """Get the last output if it's recent enough (default: within 5 minutes)."""
+        if self.last_output and (time.time() - self.last_output_time) < max_age_seconds:
+            return self.last_output
+        return None
+
+    # ── Conversation history ─────────────────────────────────────────────
 
     def add_turn(self, role: str, text: str, intent: str = "", action: str = ""):
         turn = Turn(role=role, text=text, intent=intent, action=action)
@@ -60,6 +82,9 @@ class Context:
 
     def clear(self):
         self.history.clear()
-        self.active_task  = None
-        self.last_intent  = None
-        self.last_target  = None
+        self.active_task        = None
+        self.last_intent        = None
+        self.last_target        = None
+        self.last_output        = None
+        self.last_output_domain = None
+        self.last_output_time   = 0.0

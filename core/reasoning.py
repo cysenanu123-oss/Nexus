@@ -48,6 +48,15 @@ ACTION_INTENTS = {
     "open_file", "open_folder", "list_files", "run_command",
     "system_control", "volume_control", "brightness_control",
     "network_scan", "system_info", "get_time",
+    # ── Cyber module ──────────────────────────────────────────────────────
+    "cyber_full_network_scan", "cyber_discover_devices", "cyber_port_scan",
+    "cyber_quick_scan", "cyber_full_scan", "cyber_stealth_scan",
+    "cyber_show_interfaces", "cyber_external_ip", "cyber_show_arp",
+    "cyber_show_connections", "cyber_show_routes", "cyber_show_subnet",
+    "cyber_analyze_logs", "cyber_check_logins", "cyber_check_processes",
+    "cyber_active_sessions", "cyber_check_listening",
+    "cyber_toolkit_status", "cyber_install_tool", "cyber_recommend_tool",
+    "cyber_help",
 }
 
 # Intents that are conversational

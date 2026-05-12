@@ -415,6 +415,67 @@ def _handle_recall_research(intent: Intent) -> ActionResult:
 
 
 # ─────────────────────────────────────────────
+# Cyber handlers — lazy-import CyberBrain so it only loads when needed
+# ─────────────────────────────────────────────
+
+# Map each cyber_* intent name → the natural-language command CyberBrain understands
+_CYBER_INTENT_TO_CMD: dict[str, str] = {
+    "cyber_full_network_scan": "scan my network",
+    "cyber_discover_devices":  "what devices are on my network",
+    "cyber_port_scan":         "scan ports on {target}",
+    "cyber_quick_scan":        "quick scan {target}",
+    "cyber_full_scan":         "full scan {target}",
+    "cyber_stealth_scan":      "stealth scan {target}",
+    "cyber_show_interfaces":   "show interfaces",
+    "cyber_external_ip":       "external ip",
+    "cyber_show_arp":          "arp table",
+    "cyber_show_connections":  "active connections",
+    "cyber_show_routes":       "routing table",
+    "cyber_show_subnet":       "my subnet",
+    "cyber_analyze_logs":      "check for suspicious activity",
+    "cyber_check_logins":      "failed login attempts",
+    "cyber_check_processes":   "suspicious processes",
+    "cyber_active_sessions":   "active sessions",
+    "cyber_check_listening":   "listening ports",
+    "cyber_toolkit_status":    "toolkit status",
+    "cyber_install_tool":      "install {target}",
+    "cyber_recommend_tool":    "best tool for {query}",
+    "cyber_help":              "help",
+}
+
+
+def _handle_cyber(intent: Intent) -> ActionResult:
+    """
+    Route any cyber_* intent to CyberBrain.
+    Builds the natural-language command from the template above, then
+    lets CyberBrain do the heavy lifting.
+    """
+    try:
+        from cyber import CyberBrain  # type: ignore
+    except ImportError as e:
+        return ActionResult(False, f"Cyber module not available: {e}")
+
+    template = _CYBER_INTENT_TO_CMD.get(intent.intent, intent.raw)
+
+    # Substitute captured groups into the template
+    target = intent.target or ""
+    query  = intent.query  or intent.target or ""
+    cmd = template.format(target=target, query=query)
+
+    # If no target was captured but template needs one, use raw text as fallback
+    if "{target}" in template and not target:
+        cmd = intent.raw
+
+    try:
+        brain = CyberBrain(verbose=False)
+        result_text = brain.run(cmd)
+        return ActionResult(True, result_text)
+    except Exception as e:
+        log.error(f"CyberBrain error: {e}", exc_info=True)
+        return ActionResult(False, f"Cyber operation failed: {e}")
+
+
+# ─────────────────────────────────────────────
 # Dispatch table
 # Maps intent name → handler function
 # ─────────────────────────────────────────────
@@ -436,6 +497,29 @@ DISPATCH_TABLE = {
     "research_topic":  _handle_research_topic,
     "recall_research": _handle_recall_research,
     "read_url":        _handle_research_topic,   # reuse — researcher handles URLs too
+    # ── Cyber ───────────────────────────────────────────────────────────
+    "cyber_full_network_scan": _handle_cyber,
+    "cyber_discover_devices":  _handle_cyber,
+    "cyber_port_scan":         _handle_cyber,
+    "cyber_quick_scan":        _handle_cyber,
+    "cyber_full_scan":         _handle_cyber,
+    "cyber_stealth_scan":      _handle_cyber,
+    "cyber_show_interfaces":   _handle_cyber,
+    "cyber_external_ip":       _handle_cyber,
+    "cyber_show_arp":          _handle_cyber,
+    "cyber_show_connections":  _handle_cyber,
+    "cyber_show_routes":       _handle_cyber,
+    "cyber_show_subnet":       _handle_cyber,
+    "cyber_analyze_logs":      _handle_cyber,
+    "cyber_check_logins":      _handle_cyber,
+    "cyber_check_processes":   _handle_cyber,
+    "cyber_active_sessions":   _handle_cyber,
+    "cyber_check_listening":   _handle_cyber,
+    "cyber_toolkit_status":    _handle_cyber,
+    "cyber_install_tool":      _handle_cyber,
+    "cyber_recommend_tool":    _handle_cyber,
+    "cyber_help":              _handle_cyber,
+    "network_scan":            _handle_cyber,   # legacy generic scan also goes to CyberBrain
 }
 
 
