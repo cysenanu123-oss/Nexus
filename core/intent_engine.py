@@ -47,6 +47,11 @@ class Intent:
 RULES: list[tuple[str, re.Pattern, str]] = [
 
     # ── Applications ──────────────────────────────────────────────────────
+    # run command must come first to prevent 'run command ls' → open_application
+    ("run_command",
+     re.compile(r"^(?:run|execute)\s+command\s+(?P<query>.+)$", re.I),
+     "shell"),
+
     ("open_application",
      re.compile(r"^(?:open|launch|start|run|execute)\s+(?P<target>\w[\w\s-]*)$", re.I),
      "open"),
@@ -70,7 +75,8 @@ RULES: list[tuple[str, re.Pattern, str]] = [
 
     # ── Web / Browser ─────────────────────────────────────────────────────
     ("search_web",
-     re.compile(r"^(?:search|google|look up|find)\s+(?:for\s+)?(?P<query>.+)$", re.I),
+     # 'find X' and 'search X' — but NOT 'find out about X' (that's research)
+     re.compile(r"^(?:search|google)\s+(?:for\s+)?(?P<query>.+)$", re.I),
      "search"),
 
     ("open_url",
@@ -90,10 +96,32 @@ RULES: list[tuple[str, re.Pattern, str]] = [
      re.compile(r"(?:set\s+)?brightness\s+(?P<action>up|down|to)\s*(?P<target>\d+)?", re.I),
      None),
 
+    # ── Research (must be BEFORE run_command, remember, and ask_question) ───
+    # NOTE: uses re.search so it works on long compound sentences too
+    ("research_topic",
+     re.compile(
+         r"(?:^|\b)(?:can you\s+)?(?:go online and\s+)?(?:please\s+)?"
+         r"(?:research|study|learn about|look up|find out about|"
+         r"do (?:a )?(?:full )?report on|do (?:a )?(?:full )?scan search on|"
+         r"give me (?:a )?(?:full )?report on|"
+         r"tell me everything about|search for information on|"
+         r"find information about|find out about)"
+         r"\s+(?P<query>[\w][\w\s,\.\-']+)",
+         re.I),
+     "research"),
+
     # ── Shell / Terminal ──────────────────────────────────────────────────
     ("run_command",
      re.compile(r"^(?:run|execute|do)\s+(?:command\s+)?(?P<query>.+)$", re.I),
      "shell"),
+
+    ("save_to_file",
+     re.compile(
+         r"^(?:save|write|store)\s+(?:it|this|the report|the results?|that)\s+"
+         r"(?:to|in|into|inside)\s+(?:a\s+)?(?:file\s+)?(?:called\s+)?(?:named\s+)?"
+         r"(?P<target>[\w\s\-\.]+?)(?:\s+on\s+(?:my\s+)?(?P<location>desktop|downloads|home))?$",
+         re.I),
+     "save"),
 
     # ── Memory & notes ────────────────────────────────────────────────────
     ("remember",
@@ -123,11 +151,18 @@ RULES: list[tuple[str, re.Pattern, str]] = [
      "scan"),
 
     ("cyber_quick_scan",
-     re.compile(r"(?:quick scan|fast scan)\s+(?P<target>[\d.:/\w-]+)", re.I),
+     re.compile(
+         r"(?:quick scan|fast scan)\s+"
+         r"(?P<target>(?:\d{1,3}\.){3}\d{1,3}(?:/\d+)?|[\w-]+\.[\w.-]+|localhost)",
+         re.I),
      "scan"),
 
     ("cyber_full_scan",
-     re.compile(r"(?:full scan|deep scan|detailed scan|service scan)\s+(?P<target>[\d.:/\w-]+)", re.I),
+     re.compile(
+         # Must end with a real IP, CIDR, or hostname (not plain English words)
+         r"(?:full scan|deep scan|detailed scan|service scan)\s+"
+         r"(?P<target>(?:\d{1,3}\.){3}\d{1,3}(?:/\d+)?|[\w-]+\.[\w.-]+|localhost)",
+         re.I),
      "scan"),
 
     ("cyber_stealth_scan",
@@ -216,11 +251,7 @@ RULES: list[tuple[str, re.Pattern, str]] = [
      re.compile(r"^(?:bye|goodbye|exit|quit|stop|see\s+you|later)", re.I),
      None),
 
-    # ── Research ──────────────────────────────────────────────────────────
-    ("research_topic",
-     re.compile(r"^(?:research|study|learn about|look up|find out about)\s+(?P<query>.+)$", re.I),
-     "research"),
-
+    # ── Research (bottom-of-file duplicates removed — moved to top) ───
     ("read_url",
      re.compile(r"^(?:read|fetch|summarize|learn from)\s+(?:url\s+|this\s+)?(?P<target>https?://\S+)", re.I),
      "read"),

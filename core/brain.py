@@ -25,9 +25,9 @@ from core.context        import Context
 from core.reasoning      import ReasoningEngine, DecisionType
 from core.planner        import Planner
 from core.conversation   import ConversationEngine
-from core.llm import LLM
+from core.llm            import LLM
 from core.coding_assistant import CodingAssistant
-from core.router import get_router
+from core.router         import get_router, Category
 
 log = logging.getLogger("nexus.brain")
 
@@ -105,6 +105,9 @@ class Brain:
             use_llm=use_llm,
         )
 
+        # Automation engine — lazy-loaded on first use
+        self._automation = None
+
         log.info("Brain ready.")
 
     # ─────────────────────────────────────────────
@@ -116,10 +119,39 @@ class Brain:
 
     def think(self, text: str) -> str:
         text = text.strip()
-        route = get_router().classify(text)
-        log.info(f"Route: {route}") 
         if not text:
             return "I didn't hear anything."
+
+        route = get_router().classify(text)
+        log.info("Route: %s", route)
+
+        # ── Fast-path: automation for SYSTEM/MULTI category ────────────
+        if route.category in (Category.SYSTEM, Category.MULTI):
+            auto_result = self._run_automation(text)
+            if auto_result is not None:
+                self.context.add_turn("user", text)
+                self.context.add_turn("nexus", auto_result)
+                self.context.set_last_output(auto_result, "automation")
+                self.memory.log_episode(text, auto_result, "automation")
+                self.memory.log_training_pair(text, auto_result, "automation")
+                return auto_result
+
+        # ── Fast-path: research route bypasses intent engine entirely ─────
+        if route.category.value == "research" or route.web:
+            research_keywords = [
+                "report on", "tell me about", "everything about",
+                "who is", "who are", "when was", "what is", "what are",
+                "research", "find out", "look up", "information on",
+                "scan search on", "full report",
+            ]
+            if any(kw in text.lower() for kw in research_keywords):
+                self.context.add_turn("user", text)
+                response = self._handle_research_request(text)
+                self.context.add_turn("nexus", response)
+                self.context.set_last_output(response, "research")
+                self.memory.log_episode(text, response[:200], "research")
+                self.memory.log_training_pair(text, response[:200], "research")
+                return response
 
         # Log user turn
         self.context.add_turn("user", text)
@@ -426,6 +458,12 @@ class Brain:
     # ─────────────────────────────────────────────
 
     def _execute_plan(self, text: str) -> str:
+        # First try the full automation engine for PLAN decisions
+        auto_result = self._run_automation(text)
+        if auto_result is not None:
+            return auto_result
+
+        # Fallback: legacy planner + dispatcher
         steps   = self.planner.plan(text)
         results = []
 
@@ -439,8 +477,149 @@ class Brain:
         return "\n".join(results)
 
     # ─────────────────────────────────────────────
-    # Training data tools
+    # Automation engine interface
     # ─────────────────────────────────────────────
+
+    def _get_automation(self):
+        """Lazy-load and return the Automation instance."""
+        if self._automation is None:
+            try:
+                from automation.automation import Automation
+                self._automation = Automation(
+                    verbose=True,
+                    confirm_high_risk=True,
+                    use_llm=self.llm is not None,
+                )
+                log.info("Automation engine loaded.")
+            except Exception as e:
+                log.warning("Automation engine unavailable: %s", e)
+                self._automation = False   # mark as unavailable
+        return self._automation if self._automation else None
+
+    def _run_automation(self, text: str) -> str | None:
+        """
+        Run text through the automation engine.
+        Returns the voice summary string, or None if automation
+        couldn't handle it (brain falls through to other handlers).
+        """
+        auto = self._get_automation()
+        if not auto:
+            return None
+
+        try:
+            result = auto.run(text)
+            if result.plan_error:
+                # Planner couldn't understand it — let brain try other routes
+                log.debug("Automation planner gave up: %s", result.plan_error)
+                return None
+            return result.voice_summary
+        except Exception as e:
+            log.warning("Automation engine error: %s", e)
+            return None
+
+    # ─────────────────────────────────────────────
+    # Research + file saving
+    # ─────────────────────────────────────────────
+
+    def _handle_research_request(self, text: str) -> str:
+        """
+        Full research pipeline:
+          1. Extract topic and optional filename from user text
+          2. Do web research via researcher module
+          3. Save to file if requested
+          4. Return a summary response
+        """
+        import re
+        from pathlib import Path
+        from datetime import datetime
+
+        # ── Extract save filename ──────────────────────────────────
+        save_file = None
+        location  = Path.home() / "Desktop"
+
+        # Match: 'save it in a file called X', 'in a file called X on my desktop'
+        save_patterns = [
+            r"save\s+it\s+(?:inside|in|to|into)\s+(?:a\s+)?(?:file\s+)?(?:called\s+|named\s+)?(?:a file called |)[\"']?([\w\s\-\.]+?)[\"']?(?:\s+on\s+(?:my\s+)?(?:desktop|Desktop))?",
+            r"(?:inside|in|into)\s+(?:a\s+)?(?:word\s+)?(?:file\s+)?called\s+[\"']?([\w\s\-\.]+?)[\"']?(?:\s+on\s+(?:my\s+)?(?:desktop|Desktop))?",
+            r"(?:save|store|write)\s+(?:it\s+)?(?:as|to)\s+[\"']?([\w\s\-\.]+?)[\"']?(?:\s+on\s+(?:my\s+)?(?:desktop|Desktop))?",
+            r"(?:in|into|inside)\s+(?:a\s+)?(?:file\s+)?[\"']([\w\s\-\.]+?)[\"']",
+        ]
+
+        raw_lower = text.lower()
+        for pat in save_patterns:
+            m = re.search(pat, text, re.I)
+            if m:
+                raw_name = m.group(1).strip()
+                # Add .txt if no extension
+                if raw_name and '.' not in raw_name:
+                    raw_name += '.txt'
+                save_file = raw_name
+                log.info("Save target detected: %r", save_file)
+                break
+
+        if 'desktop' in raw_lower:
+            location = Path.home() / 'Desktop'
+
+        # ── Extract topic (strip save-related suffix) ─────────────────
+        topic = text
+        # Remove the save instruction part to get a clean research topic
+        topic_clean = re.sub(
+            r"(?:,|\s+and)?\s+(?:save|store|write)\s+it.*$",
+            "", topic, flags=re.I
+        ).strip()
+        # Remove leading instruction words
+        topic_clean = re.sub(
+            r"^(?:can you\s+)?(?:go online and\s+)?(?:do|give me)\s+(?:a\s+)?(?:full\s+)?(?:report|scan search|research)\s+(?:on|for|about)\s+",
+            "", topic_clean, flags=re.I
+        ).strip()
+        # Remove trailing location hints
+        topic_clean = re.sub(
+            r"(?:,\s*)?(?:inside|in|to|into|save it).*$",
+            "", topic_clean, flags=re.I
+        ).strip() or text
+
+        log.info("Research topic: %r — save to: %r", topic_clean, save_file)
+
+        # ── Do the actual research ────────────────────────────────
+        if self.researcher:
+            try:
+                report = self.researcher.answer(topic_clean)
+            except Exception as e:
+                log.warning("Researcher failed: %s", e)
+                report = self._understand(text, self.intent_eng.parse(text))
+        else:
+            report = self._understand(text, self.intent_eng.parse(text))
+
+        # ── Save to file if requested ────────────────────────────
+        if save_file:
+            try:
+                save_path = location / save_file
+                save_path.parent.mkdir(parents=True, exist_ok=True)
+
+                # Build a file-friendly version with header
+                file_content = (
+                    f"NEXUS RESEARCH REPORT\n"
+                    f"Topic   : {topic_clean}\n"
+                    f"Date    : {datetime.now().strftime('%Y-%m-%d %H:%M')}\n"
+                    f"{'=' * 60}\n\n"
+                    f"{report}\n\n"
+                    f"{'=' * 60}\n"
+                    f"Generated by NEXUS AI — {datetime.now().strftime('%Y-%m-%d')}\n"
+                )
+
+                save_path.write_text(file_content, encoding='utf-8')
+                log.info("Report saved to: %s", save_path)
+
+                return (
+                    f"{report}\n\n"
+                    f"\u2713 Report saved to: {save_path} "
+                    f"({save_path.stat().st_size:,} bytes)"
+                )
+            except Exception as e:
+                log.warning("Failed to save report: %s", e)
+                return report + f"\n\n[Could not save file: {e}]"
+
+        return report
 
     def mark_good(self):
         """Call after a response to mark the last pair as high quality."""
