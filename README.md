@@ -310,12 +310,12 @@ Turn NEXUS into a cybersecurity assistant.
 
 ### Tasks
 
-* [NOT STARTED] Add network monitoring tools
-* [NOT STARTED] Add log analysis system
-* [NOT STARTED] Add suspicious activity detection
+* [DONE] Add network monitoring tools
+* [DONE] Add log analysis system
+* [DONE] Add suspicious activity detection
 * [NOT STARTED] Add malware behavior analysis
 * [NOT STARTED] Add packet inspection tools
-* [NOT STARTED] Add vulnerability scanning support
+* [DONE] Add vulnerability scanning support
 * [NOT STARTED] Add threat intelligence integration
 
 ---
@@ -379,8 +379,8 @@ Prevent unauthorized access and unsafe actions.
 * [NOT STARTED] Smart home integration
 * [NOT STARTED] Mobile companion app
 * [NOT STARTED] Desktop graphical interface
-* [NOT STARTED] AI-generated automation workflows
-* [NOT STARTED] Autonomous task execution
+* [DONE] AI-generated automation workflows
+* [DONE] Autonomous task execution
 * [NOT STARTED] Real-time meeting assistant
 * [NOT STARTED] AI-driven scheduling assistant
 * [NOT STARTED] Offline knowledge engine
@@ -467,9 +467,20 @@ NEXUS/
 │   ├── summarizer.py        # Page summarization using local LLM
 │   └── memory.py            # Vector database (ChromaDB) for research retention
 ├── plugins/                 # Modular plugin directory for extensions
-├── cyber/                   # [NOT STARTED]
+├── cyber/
+│   ├── analyzer.py          # Log analyzer & threat detection
+│   ├── cyber.py             # Natural language cyber interface
+│   ├── network.py           # Network intelligence (interfaces, ARP, etc.)
+│   ├── scanner.py           # Port scanner (nmap integration)
+│   └── toolkit.py           # Tool management & installation
 ├── memory/                  # [NOT STARTED]
-├── automation/              # [NOT STARTED]
+├── automation/
+│   ├── automation.py        # Unified automation interface
+│   ├── executor.py          # Task executor
+│   ├── gui_agent.py         # GUI automation
+│   ├── planner.py           # Task planner
+│   ├── reporter.py          # Progress reporter
+│   └── shell_agent.py       # Shell command execution
 ├── tests/
 ├── docs/
 │
@@ -505,6 +516,8 @@ The first working version of NEXUS should be able to:
 * [DONE] Voice pipeline implementation (microphone ✅, wake word ✅, STT ✅, TTS ✅, engine ✅)
 * [DONE] Custom wake word model — trained locally, 100% val accuracy, live detection confirmed
 * [DONE] Speaker identification system — ECAPA-TDNN enrolled, wired into voice engine
+* [DONE] Cybersecurity module — network scanning, log analysis, and toolkit management implemented
+* [DONE] Automation system — planning and execution of tasks (shell, GUI) implemented
 * [IN PROGRESS] Brain / reasoning / memory integration (Ollama/Mistral via `core/brain.py`)
 
 ---
