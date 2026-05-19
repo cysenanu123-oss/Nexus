@@ -72,7 +72,11 @@ class VoiceEngine:
 
         # Core systems
         self.listener    = MicrophoneListener()
-        self.detector    = WakeWordDetector(threshold=0.85)
+        try:
+            self.detector = WakeWordDetector(threshold=0.85)
+        except Exception:
+            logger.warning("Wake word model unavailable — voice engine disabled. Retrain with tools/train_wakeword.py")
+            self.detector = None
         self.transcriber = Transcriber(model_size=self.whisper_model)
 
         # Speaker ID — loads profile if enrolled
@@ -147,8 +151,12 @@ class VoiceEngine:
 
             # ── 1. WAIT FOR WAKE WORD ─────────────────────────
             if not self._continuous_mode:
-                self.detector.wait_for_wake_word(listener=self.listener)
-                print("\n[NEXUS] Wake word detected")
+                if self.detector is None:
+                    logger.warning("No wake word model — running in continuous mode.")
+                    self._continuous_mode = True
+                else:
+                    self.detector.wait_for_wake_word(listener=self.listener)
+                    print("\n[NEXUS] Wake word detected")
 
             print("[NEXUS] Listening...\n")
 

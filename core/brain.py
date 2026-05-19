@@ -28,6 +28,13 @@ from core.conversation   import ConversationEngine
 from core.llm            import LLM
 from core.coding_assistant import CodingAssistant
 from core.router         import get_router, Category
+from core.stream_output       import get_output
+from core.knowledge           import get_knowledge_base
+from core.normalizer          import get_normalizer, NormalizedInput
+from core.entry_model         import get_entry_model, Cat
+from core.autonomous_planner  import AutonomousPlanner
+from core.skill_registry      import get_registry
+from core.task_planner        import get_task_planner
 
 log = logging.getLogger("nexus.brain")
 
@@ -63,12 +70,19 @@ class Brain:
             self.llm = None
             log.warning(f"LLM unavailable: {e}")
 
-        # Coding assistant
+        # Coding assistant (screen-based)
         try:
             self.coder = CodingAssistant()
         except Exception as e:
             self.coder = None
             log.warning(f"Coding assistant unavailable: {e}")
+
+        # Narrated output + knowledge base (always available)
+        self._out = get_output()
+        self._kb  = get_knowledge_base()
+
+        # Code engine (wired after llm + researcher are ready)
+        self._code_engine = None
 
         # Research module
         try:
@@ -78,6 +92,43 @@ class Brain:
         except Exception as e:
             self.researcher = None
             log.warning(f"Researcher unavailable: {e}")
+
+        # Code engine — lazy singleton, wired here so it has llm + researcher
+        try:
+            from core.code_engine import get_engine
+            self._code_engine = get_engine(
+                llm=self.llm,
+                researcher=self.researcher,
+            )
+            log.info("CodeEngine ready.")
+        except Exception as e:
+            self._code_engine = None
+            log.warning(f"CodeEngine unavailable: {e}")
+
+        # Input normalization + entry model + autonomous planner
+        self._normalizer  = get_normalizer()
+        self._entry_model = get_entry_model()
+        self._auto_planner = AutonomousPlanner(
+            memory=self.memory,
+            llm=self.llm,
+            researcher=self.researcher,
+        )
+        log.info("Normalizer + EntryModel + AutonomousPlanner ready.")
+
+        # Skill registry + task planner (skill-aware logical planning)
+        try:
+            self._skill_registry = get_registry()
+            self._task_planner   = get_task_planner(
+                memory=self.memory,
+                llm=self.llm,
+                researcher=self.researcher,
+            )
+            log.info("SkillRegistry + TaskPlanner ready (%d skills).",
+                     self._skill_registry.count())
+        except Exception as e:
+            self._skill_registry = None
+            self._task_planner   = None
+            log.warning("SkillRegistry/TaskPlanner unavailable: %s", e)
 
         # Vision
         try:
@@ -122,6 +173,35 @@ class Brain:
         if not text:
             return "I didn't hear anything."
 
+        # ── Stage 0: Normalize + Entry Model ─────────────────────────────
+        ni = self._normalizer.normalize(text)
+
+        if ni.was_changed:
+            log.info("Normalized: %r → %r", text, ni.corrected)
+            # Tell the user if something was corrected (non-intrusively)
+            corrections = [f"{a!r} → {b!r}" for a, b in ni.corrections
+                           if a.lower() != b.lower()]
+            if corrections:
+                self._out.thinking(f"Corrected: {', '.join(corrections[:3])}")
+
+        # Use corrected text from here on
+        text = ni.corrected
+
+        entry = self._entry_model.classify(ni)
+        log.info("Entry: %s", entry)
+
+        # ── Stage 0b: Autonomous Planner fast-path ────────────────────────
+        # Calendar / scheduling always goes to autonomous planner
+        if entry.category == Cat.CALENDAR or (
+            entry.needs_planning and entry.category not in (Cat.CYBER, Cat.CODE, Cat.RESEARCH)
+        ):
+            self.context.add_turn("user", text)
+            response = self._auto_planner.execute(text, entry_result=entry, normalized_input=ni)
+            self.context.add_turn("nexus", response)
+            self.memory.log_episode(text, response, "autonomous_plan")
+            self.memory.log_training_pair(text, response, "autonomous_plan")
+            return response
+
         route = get_router().classify(text)
         log.info("Route: %s", route)
 
@@ -137,7 +217,7 @@ class Brain:
                 return auto_result
 
         # ── Fast-path: research route bypasses intent engine entirely ─────
-        if route.category.value == "research" or route.web:
+        if route.category.value == "research" or route.needs_internet:
             research_keywords = [
                 "report on", "tell me about", "everything about",
                 "who is", "who are", "when was", "what is", "what are",
@@ -182,7 +262,53 @@ class Brain:
     # Router
     # ─────────────────────────────────────────────
 
+    # ── Cyber keyword fast-path (checked before intent engine) ──
+    _CYBER_DIRECT_TRIGGERS = (
+        "cyber news", "hacking news", "security news", "latest news", "threat intel",
+        "cve lookup", "cve search", "search cve", "look up cve",
+        "find exploit", "exploit search", "searchsploit", "exploitdb", "download exploit",
+        "github advisory", "ghsa",
+        "recon on", "full recon", "reconnaissance", "osint on", "gather info on",
+        "find subdomains", "enumerate subdomains", "subdomain",
+        "dns records", "dns lookup", "dns info",
+        "whois ", "ip info ", "who owns",
+        "http headers", "web headers", "fingerprint ", "what tech",
+        "dir scan", "directory scan", "dirbuster", "gobuster", "ffuf",
+        "robots.txt", "check robots",
+        "authorize ", "authorized targets", "show targets",
+        "vuln scan", "vulnerability scan", "run nuclei", "run nikto",
+        "sandbox ", "create sandbox", "clone target",
+        "monitor target", "watch target",
+    )
+
     def _route(self, text, intent, decision) -> str:
+        t_lower = text.lower()
+
+        # ── Skill commands fast-path ──────────────────────────────────────
+        if any(t in t_lower for t in ("acquire skill", "learn from", "clone skill",
+                                       "learn skill", "import skill")):
+            return self._cmd_acquire_skill(text)
+
+        if any(t in t_lower for t in ("create skill", "create a skill", "make a skill",
+                                       "build a skill", "write a skill")):
+            return self._cmd_create_skill(text)
+
+        if t_lower.strip() in ("list skills", "show skills", "my skills", "what skills"):
+            return self._cmd_list_skills()
+
+        if t_lower.startswith("search skills") or t_lower.startswith("find skill"):
+            query = text.split(None, 2)[-1]
+            return self._cmd_search_skills(query)
+
+        if any(t in t_lower for t in ("do this task", "plan this task", "figure out how to",
+                                       "work out how to", "how would you", "figure this out")):
+            return self._cmd_task_plan(text)
+
+        # ── Cyber fast-path (broad keyword match, before intent engine) ───
+        if self.cyber and any(trigger in t_lower for trigger in self._CYBER_DIRECT_TRIGGERS):
+            response = self.cyber.run(text)
+            self.context.set_last_output(response, "cyber")
+            return response
 
         # ── Multi-step plan ──────────────────────────────────────────────
         if decision.type == DecisionType.PLAN:
@@ -273,7 +399,30 @@ class Brain:
         ]):
             return self.vision.answer_about_screen(text)
 
-        # ── Coding assistant ──────────────────────────────────────
+        # ── Code Engine (planning + narrated code work) ──────────
+        code_engine_triggers = [
+            "plan ", "plan how", "how would you", "how do i",
+            "add a feature", "add feature", "implement",
+            "build a", "build me", "create a module", "create a class",
+            "write a module", "write a class", "write a script",
+            "modify ", "change the code", "update the code",
+            "what files", "what does nexus", "analyse the code",
+            "analyse ", "analyze ", "read through", "read the code",
+            "explain the code", "what's in", "what is in",
+            "recall what", "what do you know about",
+            "learn about", "go online and learn",
+            "search and learn", "look up and learn",
+        ]
+        if self._code_engine and any(t in text.lower() for t in code_engine_triggers):
+            # Knowledge recall shortcut
+            if any(t in text.lower() for t in ["recall what", "what do you know about"]):
+                return self._code_engine.recall(text)
+            # Direct online learning
+            if any(t in text.lower() for t in ["search and learn", "go online and learn", "look up and learn"]):
+                return self._code_engine.search_and_learn(text)
+            return self._code_engine.work(text)
+
+        # ── Coding assistant (screen-based, quick questions) ──────
         coding_triggers = [
             "fix", "debug", "what does this",
             "write a function", "write code", "help me code",
@@ -287,6 +436,82 @@ class Brain:
 
         # ── Adaptive Understanding Pipeline (default) ─────────────
         return self._understand(text, intent)
+
+    # ─────────────────────────────────────────────
+    # Skill / Task Planner commands
+    # ─────────────────────────────────────────────
+
+    def _cmd_acquire_skill(self, text: str) -> str:
+        import re
+        url_match = re.search(r"https?://\S+", text)
+        if not url_match:
+            return ("Please provide a URL to acquire a skill from.\n"
+                    "  Example: acquire skill from https://github.com/user/repo")
+        url = url_match.group(0)
+        try:
+            from core.skill_acquirer import SkillAcquirer
+            acq    = SkillAcquirer(llm=self.llm, researcher=self.researcher)
+            skills = acq.acquire(url)
+            if not skills:
+                return f"No skills could be extracted from {url}."
+            lines = [f"Acquired {len(skills)} skill(s) from {url}:"]
+            for s in skills[:8]:
+                lines.append(f"  • [{s.category}] {s.name}: {s.description}")
+            return "\n".join(lines)
+        except Exception as exc:
+            return f"Skill acquisition failed: {exc}"
+
+    def _cmd_create_skill(self, text: str) -> str:
+        import re
+        # Strip the trigger phrase to get the description
+        desc = re.sub(
+            r"(create|make|build|write)\s+(a\s+)?skill\s+(to|for|that|which)?",
+            "", text, flags=re.I
+        ).strip()
+        if not desc:
+            return ("Please describe what the skill should do.\n"
+                    "  Example: create a skill to send emails via Gmail SMTP")
+        name = re.sub(r"[^a-z0-9_]", "_", desc.lower().split()[0])[:20] + "_skill"
+        if not self._task_planner:
+            return "Task planner not available."
+        result = self._task_planner._create_skill(
+            {"name": name, "description": desc}, {}
+        )
+        return result
+
+    def _cmd_list_skills(self) -> str:
+        if not self._skill_registry:
+            return "Skill registry not available."
+        skills = self._skill_registry.all()
+        if not skills:
+            return "No skills registered yet."
+        lines = [f"Skills ({len(skills)} total):"]
+        current_cat = ""
+        for s in skills:
+            if s.category != current_cat:
+                current_cat = s.category
+                lines.append(f"\n  {current_cat.upper()}")
+            src = "" if s.source == "builtin" else f" [{s.source.split(':')[0]}]"
+            lines.append(f"    • {s.name}{src}: {s.description}")
+        return "\n".join(lines)
+
+    def _cmd_search_skills(self, query: str) -> str:
+        if not self._skill_registry:
+            return "Skill registry not available."
+        results = self._skill_registry.search(query, limit=6)
+        if not results:
+            return f"No skills matched '{query}'."
+        lines = [f"Skills matching '{query}':"]
+        for s in results:
+            lines.append(f"  • [{s.category}] {s.name}: {s.description}")
+            if s.usage_example:
+                lines.append(f"      Usage: {s.usage_example}")
+        return "\n".join(lines)
+
+    def _cmd_task_plan(self, text: str) -> str:
+        if not self._task_planner:
+            return "Task planner not available."
+        return self._task_planner.plan_and_execute(text)
 
     # ─────────────────────────────────────────────
     # Adaptive Understanding Pipeline

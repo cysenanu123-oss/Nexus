@@ -63,7 +63,7 @@ The long-term goal is to create a personalized General AI ecosystem capable of:
 
 ## Development Environment
 
-* Linux
+* Linux / WSL2
 * VS Code / VSCodium
 
 ## AI & ML Frameworks
@@ -87,6 +87,7 @@ The long-term goal is to create a personalized General AI ecosystem capable of:
 * OpenCV
 * MSS
 * OCR (Tesseract)
+* pyautogui (GUI automation)
 
 ## Backend / System
 
@@ -145,6 +146,7 @@ Create the main command interface for interacting with NEXUS.
 * [DONE] Add colorized terminal output (`Color` class + `Printer` helper with ANSI support detection)
 * [DONE] Add system status display (`status`, `sysinfo`, `modules` commands)
 * [DONE] Add command history (in-session `history` command)
+* [DONE] Add fast-path input classifier (`core/normalizer.py` + `core/entry_model.py` — spell correction + intent triage before brain)
 * [NOT STARTED] Add background daemon mode
 * [NOT STARTED] Add hotword wake system ("Hey Nexus")
 
@@ -189,6 +191,7 @@ Allow NEXUS to hear, transcribe, and understand spoken commands.
   * [DONE] Audio normalization & confidence scoring
   * [DONE] CLI testing modes (`--file`, `--listen`, `--bench`)
 * [DONE] Voice Engine loop (`voice/engine.py` — wires listener + wakeword + STT + speaker ID + TTS)
+* [DONE] Streamed TTS output (`voice/engine.py` — word-by-word voice synthesis with overlap prevention)
 
 ---
 
@@ -257,13 +260,13 @@ Allow NEXUS to coordinate multiple AI models together.
 
 ### Tasks
 
-* [NOT STARTED] Design model routing architecture
-* [NOT STARTED] Build task classifier
-* [NOT STARTED] Create model selection pipeline
-* [NOT STARTED] Add fallback model system
+* [DONE] Design model routing architecture (`core/brain.py` — central orchestrator)
+* [DONE] Build fast-path input classifier (`core/entry_model.py` — rule + keyword triage; bypasses LLM for obvious commands)
+* [DONE] Build input normalizer (`core/normalizer.py` — spell correction + lowercasing + punctuation cleanup before routing)
+* [NOT STARTED] Add fallback model system (graceful degradation when Ollama is offline is partially handled)
 * [NOT STARTED] Add multi-model collaboration
 * [NOT STARTED] Add reasoning pipeline
-* [NOT STARTED] Add context memory management
+* [DONE] Add context memory management (`core/memory.py` — SQLite-backed conversation and fact storage)
 
 ---
 
@@ -275,11 +278,11 @@ Run powerful language models locally.
 
 ### Tasks
 
-* [NOT STARTED] Research lightweight local LLMs
-* [NOT STARTED] Setup local inference environment
-* [NOT STARTED] Integrate GGUF models
-* [NOT STARTED] Add streaming responses
-* [NOT STARTED] Add local memory storage
+* [DONE] Research lightweight local LLMs (Ollama + Mistral selected)
+* [DONE] Setup local inference environment (Ollama server via `core/conversation.py`)
+* [NOT STARTED] Integrate GGUF models directly
+* [DONE] Add streaming responses (`core/stream_output.py` — token-by-token terminal streaming with color support)
+* [DONE] Add local memory storage (`core/knowledge.py` — knowledge base with ChromaDB-style vector search)
 * [NOT STARTED] Optimize GPU/CPU usage
 
 ---
@@ -295,9 +298,9 @@ Allow NEXUS to improve over time.
 * [DONE] Create research collection system (`research/searcher.py` and `research/researcher.py`)
 * [DONE] Add document ingestion pipeline (`research/fetcher.py`)
 * [DONE] Build vector memory database (`research/memory.py` using ChromaDB)
-* [DONE] Add knowledge indexing
+* [DONE] Add knowledge indexing (`core/knowledge.py`)
 * [DONE] Add autonomous summarization (`research/summarizer.py` using local LLMs)
-* [NOT STARTED] Add learning feedback loop
+* [DONE] Add learning feedback loop (`core/task_planner.py` — learns procedures to `data/task_procedures.jsonl`)
 * [NOT STARTED] Add long-term memory architecture
 
 ---
@@ -306,17 +309,21 @@ Allow NEXUS to improve over time.
 
 ## Goal
 
-Turn NEXUS into a cybersecurity assistant.
+Turn NEXUS into a cybersecurity assistant (authorized pentesting / CTF / educational use only).
 
 ### Tasks
 
-* [DONE] Add network monitoring tools
-* [DONE] Add log analysis system
-* [DONE] Add suspicious activity detection
+* [DONE] Add network monitoring tools (`cyber/network.py`)
+* [DONE] Add log analysis system (`cyber/analyzer.py`)
+* [DONE] Add suspicious activity detection (`cyber/analyzer.py`)
+* [DONE] Add vulnerability scanning support (`cyber/scanner.py` — nmap integration)
+* [DONE] Add threat intelligence integration (`cyber/intel.py` — OSINT gathering)
+* [DONE] Add reconnaissance module (`cyber/recon.py` — passive recon pipeline)
+* [DONE] Add sandboxed execution environment (`cyber/sandbox.py` — safe subprocess isolation)
+* [DONE] Wire cyber commands into brain (`core/brain.py` — natural language cyber interface)
+* [DONE] Register 9 cyber skills in skill registry (port scan, OSINT, recon, exploit search, CVE lookup, etc.)
 * [NOT STARTED] Add malware behavior analysis
 * [NOT STARTED] Add packet inspection tools
-* [DONE] Add vulnerability scanning support
-* [NOT STARTED] Add threat intelligence integration
 
 ---
 
@@ -328,13 +335,21 @@ Allow NEXUS to assist with development work.
 
 ### Tasks
 
-* [NOT STARTED] Add code understanding
-* [NOT STARTED] Add terminal command assistance
+* [DONE] Add code understanding (`core/code_engine.py` — narrated coding + code planning system)
+* [DONE] Add streaming code output (`core/stream_output.py` — live token-by-token display)
+* [DONE] Add knowledge base for code context (`core/knowledge.py` — persistent local knowledge store)
+* [DONE] Add terminal command assistance (brain routes shell commands via ShellAgent)
 * [NOT STARTED] Add debugging assistant
 * [NOT STARTED] Add project structure analysis
 * [NOT STARTED] Add Git integration
-* [NOT STARTED] Add code generation support
+* [DONE] Add code generation support (`core/code_engine.py` + `core/task_planner.py` create_skill action)
 * [NOT STARTED] Add auto-documentation system
+
+### Completed Coding Sub-Components
+
+* [DONE] `StreamOutput` (`core/stream_output.py`) — word-by-word streaming to terminal with ANSI color; also used by voice engine for TTS overlap prevention
+* [DONE] `KnowledgeBase` (`core/knowledge.py`) — persistent SQLite + in-memory knowledge store; `store()`, `recall()`, `search()`, fuzzy keyword matching
+* [DONE] `CodeEngine` (`core/code_engine.py`) — narrated coding and planning system; wired into `brain._route()` and `main.py` CLI via `code` command
 
 ---
 
@@ -346,12 +361,13 @@ Allow NEXUS to remember conversations and preferences.
 
 ### Tasks
 
-* [NOT STARTED] Design memory architecture
-* [NOT STARTED] Add short-term memory
-* [NOT STARTED] Add long-term memory
-* [NOT STARTED] Add conversation indexing
-* [NOT STARTED] Add memory search system
-* [NOT STARTED] Add user preference storage
+* [DONE] Design memory architecture (`core/memory.py` — SQLite-backed, multiple memory types)
+* [DONE] Add short-term memory (conversation history, in-session context)
+* [DONE] Add long-term memory (persistent fact and preference storage)
+* [DONE] Add conversation indexing (stored and searchable via `core/memory.py`)
+* [DONE] Add memory search system (`memory.search()` — keyword + semantic lookup)
+* [DONE] Add user preference storage (preference facts stored in memory DB)
+* [DONE] Add knowledge base layer (`core/knowledge.py` — supplementary knowledge outside conversation history)
 
 ---
 
@@ -363,16 +379,110 @@ Prevent unauthorized access and unsafe actions.
 
 ### Tasks
 
+* [DONE] Add restricted command execution (brain whitelist/blacklist; high-risk confirmation in Executor)
 * [NOT STARTED] Add permission management
 * [NOT STARTED] Add voice authorization
 * [NOT STARTED] Add encrypted storage
 * [NOT STARTED] Add activity logging
-* [NOT STARTED] Add restricted command execution
-* [NOT STARTED] Add sandbox environment
+* [DONE] Add sandbox environment (`cyber/sandbox.py` — subprocess isolation for untrusted command execution)
 
 ---
 
-# 13. FUTURE EXPANSION IDEAS
+# 13. SKILL SYSTEM & LOGICAL TASK PLANNER
+
+## Goal
+
+Allow NEXUS to figure out HOW to do arbitrary tasks, acquire new capabilities from GitHub/URLs,
+and create its own skills when none exist.
+
+### Tasks
+
+* [DONE] Build skill registry (`core/skill_registry.py` — SQLite catalog of named capabilities)
+* [DONE] Seed built-in skills (24 skills across cyber, calendar, code, memory, research, system categories)
+* [DONE] Build skill acquirer (`core/skill_acquirer.py` — clone GitHub repos, parse Python files, extract & register skills)
+* [DONE] Build logical task planner (`core/task_planner.py` — 5-stage planning: memory → skills → web research → LLM → heuristic)
+* [DONE] Wire task planner into brain (`core/brain.py` — skill commands + task planning commands)
+* [DONE] Add skill creation on demand (LLM writes Python function → saved to `data/skills/created/` → registered)
+* [DONE] Add task procedure learning (successful plans saved to `data/task_procedures.jsonl` for reuse)
+* [DONE] Add skill CLI commands in `main.py` (`skills list`, `skills search`, `skills acquire`, `skills create`)
+* [DONE] Add `task` CLI command in `main.py` (`task <natural language goal>`)
+
+### Completed Skill System Sub-Components
+
+* [DONE] `SkillRegistry` (`core/skill_registry.py`)
+  * SQLite database at `data/skills/registry.db`
+  * `Skill` dataclass: name, description, category, source, tags, code_path, invoke_fn, parameters, usage tracking
+  * Methods: `register()`, `get()`, `search()`, `list_by_category()`, `update_usage()`, `count()`
+  * `get_registry()` singleton
+* [DONE] `SkillAcquirer` (`core/skill_acquirer.py`)
+  * `acquire(url)` — auto-detects GitHub repo vs Python file vs webpage
+  * GitHub: `git clone --depth=1`, scans up to 40 `.py` files, skips tests/venv
+  * AST-based function extraction (public functions with docstrings ≥15 chars)
+  * LLM grouping into high-level skills (max 10 per repo)
+  * Acquired repos saved to `data/skills/acquired/<repo-name>/`
+  * `get_acquirer()` singleton
+* [DONE] `TaskPlanner` (`core/task_planner.py`)
+  * 5-stage planning pipeline: memory recall → skill search → web research → LLM plan → heuristic fallback
+  * `_recall_procedure()` — 60% word-overlap match against saved procedures
+  * `_has_enough_skills()` — 35% word-overlap match against skill registry
+  * `_research_how_to()` — live web search + stores findings to knowledge base
+  * `_llm_plan()` — JSON-structured plan with `procedure` field
+  * `_create_skill()` — LLM writes Python function, saves and registers it
+  * `_learn()` — appends procedure to `data/task_procedures.jsonl` + memory
+  * Action types: `shell`, `memory`, `research`, `notify`, `llm_respond`, `acquire_skill`, `create_skill`, `cyber`, `calendar`, any registry skill name
+  * `get_task_planner()` singleton
+
+---
+
+# 14. UNIFIED AUTOMATION SYSTEM
+
+## Goal
+
+Allow NEXUS to execute any task — physical (mouse, keyboard, apps) or logical (AI reasoning, calendar, cyber) — through a single planning and execution pipeline.
+
+### Tasks
+
+* [DONE] Build rule-based task planner (`automation/planner.py` — 40+ rule patterns for shell/GUI/web/wait steps)
+* [DONE] Build step executor (`automation/executor.py` — dependency resolution, retry, timeout, dry-run)
+* [DONE] Build shell agent (`automation/shell_agent.py` — launch/kill apps, run commands, file ops; 60+ app aliases)
+* [DONE] Build GUI agent (`automation/gui_agent.py` — mouse, keyboard, window management, OCR text finding)
+* [DONE] Build progress reporter (`automation/reporter.py` — real-time step progress display)
+* [DONE] Build unified entry point (`automation/automation.py` — `Automation.run(instruction)` pipeline)
+* [DONE] Build AI/physical unified planner (`automation/autonomous_planner.py` — merged AI reasoning + physical execution)
+* [DONE] Add physical task detection (regex routing: physical triggers vs AI override patterns)
+* [DONE] Add calendar / reminder system (`.ics` file creation, system notifications, `at` scheduling)
+* [DONE] Add WSL2 path fallback (calendar files saved to `data/calendar/` when Desktop doesn't exist)
+* [DONE] Wire automation into brain and main.py
+* [DONE] Backward-compatibility shim (`core/autonomous_planner.py` re-exports from `automation/autonomous_planner.py`)
+
+### Completed Automation Sub-Components
+
+* [DONE] `ShellAgent` (`automation/shell_agent.py`)
+  * `launch_app(name)` — 60+ app aliases (browsers, editors, terminals, security tools)
+  * `run_command(cmd)` — subprocess with timeout, cwd support
+  * `create_file()`, `write_file()`, `delete_file()` — safe file operations
+  * `check()` — check_file_exists, check_process_running, check_python_import, check_screen_text
+* [DONE] `GUIAgent` (`automation/gui_agent.py`)
+  * Mouse: `click()`, `double_click()`, `right_click()`, `drag_drop()`, `smooth_move_and_click()`
+  * Keyboard: `type_text()`, `press_key()`, `hotkey()`
+  * Window: `focus_window()`, `wait_window()`, `maximize_window()`, `minimize_window()`, `close_window()`
+  * Navigation: `navigate_url()` — opens URL in default browser
+  * Screen: `screenshot()`, `find_text_on_screen()` (Tesseract OCR)
+  * Backend: pyautogui + xdotool + wmctrl (graceful fallback if tools missing)
+* [DONE] `Automation` (`automation/automation.py`)
+  * `run(instruction, dry_run, on_progress)` — plan → execute → report
+  * `get_automation()` singleton
+* [DONE] `AutonomousPlanner` (`automation/autonomous_planner.py`)
+  * Physical task detection via `_PHYSICAL_TRIGGERS` / `_AI_OVERRIDE` regex
+  * `execute(goal)` — routes to `_run_physical()` or AI planning based on goal type
+  * Extended `_run_step()` handlers: `shell`, `shell_cmd`, `gui`, `automation`, `launch_app`, `click`, `type_text`, `press_key`, `hotkey`, `scroll`, `navigate_url`, `screenshot`
+  * Calendar actions: `.ics` creation, desktop notification, `at`-command scheduling
+  * Cyber actions: OSINT, recon, port scan, CVE lookup, exploit search
+  * Lazy-loaded agents via `_get_gui_agent()`, `_get_shell_agent()`, `_get_automation()`
+
+---
+
+# 15. FUTURE EXPANSION IDEAS
 
 ### Ideas
 
@@ -382,7 +492,7 @@ Prevent unauthorized access and unsafe actions.
 * [DONE] AI-generated automation workflows
 * [DONE] Autonomous task execution
 * [NOT STARTED] Real-time meeting assistant
-* [NOT STARTED] AI-driven scheduling assistant
+* [DONE] AI-driven scheduling assistant (calendar + reminder system via AutonomousPlanner)
 * [NOT STARTED] Offline knowledge engine
 * [NOT STARTED] Multi-user support
 * [NOT STARTED] Personalized voice generation
@@ -391,9 +501,7 @@ Prevent unauthorized access and unsafe actions.
 
 # CURRENT DEVELOPMENT PRIORITY
 
-## Phase 1 — Core Foundation
-
-### Immediate Tasks
+## Phase 1 — Core Foundation ✅ COMPLETE
 
 1. ~~Install Linux development environment~~ [DONE]
 2. ~~Setup Python and virtual environment~~ [DONE]
@@ -402,107 +510,202 @@ Prevent unauthorized access and unsafe actions.
 5. ~~Create ASCII startup screen~~ [DONE]
 6. ~~Setup voice input system~~ [DONE]
 7. ~~Test basic command execution~~ [DONE]
-8. Setup GitHub repository [NOT STARTED]
-9. ~~Create module architecture~~ [DONE]
-10. ~~Build first wake-word prototype~~ [DONE]
+8. ~~Create module architecture~~ [DONE]
+9. ~~Build first wake-word prototype~~ [DONE]
+
+## Phase 2 — Intelligence & Automation ✅ COMPLETE
+
+1. ~~Brain orchestrator with Ollama/Mistral~~ [DONE]
+2. ~~Cybersecurity module (scan, recon, OSINT, intel)~~ [DONE]
+3. ~~Automation system (shell, GUI, planning, execution)~~ [DONE]
+4. ~~Unified autonomous planner (AI + physical tasks)~~ [DONE]
+5. ~~Streaming output + knowledge base~~ [DONE]
+6. ~~Code engine (narrated coding + planning)~~ [DONE]
+
+## Phase 3 — Self-Extension [IN PROGRESS]
+
+1. ~~Skill registry (catalog of named capabilities)~~ [DONE]
+2. ~~Skill acquirer (clone GitHub repos, learn from URLs)~~ [DONE]
+3. ~~Logical task planner (5-stage planning + learning)~~ [DONE]
+4. ~~Skill creation on demand (LLM writes Python functions)~~ [DONE]
+5. [IN PROGRESS] Long-term memory architecture
+6. [NOT STARTED] Multi-model collaboration
+7. [NOT STARTED] Background daemon mode
 
 ---
 
-# INITIAL PROJECT STRUCTURE
+# PROJECT STRUCTURE
 
-```bash
+```
 NEXUS/
 │
 ├── core/
-│   ├── logger.py            # Centralized logging — color terminal + rotating file
-│   ├── config.py            # Schema-validated JSON config with dot-path API
-│   ├── brain.py             # Brain orchestrator (memory + intent + reasoning)
-│   ├── intent_engine.py     # Rule-based + LLM intent classifier
-│   ├── dispatcher.py        # Maps intents to system actions
-│   ├── planner.py           # Task planning layer
-│   ├── reasoning.py         # Reasoning pipeline
-│   ├── memory.py            # Short + long-term memory manager
-│   ├── conversation.py      # Conversation engine (Ollama/Mistral)
-│   └── plugins.py           # Plugin Architecture and Manager
+│   ├── logger.py               # Centralized logging — color terminal + rotating file
+│   ├── config.py               # Schema-validated JSON config with dot-path API
+│   ├── brain.py                # Brain orchestrator — routes input to all subsystems
+│   ├── intent_engine.py        # Rule-based + LLM intent classifier
+│   ├── dispatcher.py           # Maps intents to system actions
+│   ├── normalizer.py           # Spell correction + input normalization (fast-path)
+│   ├── entry_model.py          # Fast-path intent triage before brain (keyword routing)
+│   ├── planner.py              # Legacy task planning layer
+│   ├── reasoning.py            # Reasoning pipeline
+│   ├── memory.py               # SQLite-backed short + long-term memory manager
+│   ├── conversation.py         # Conversation engine (Ollama/Mistral)
+│   ├── stream_output.py        # Token-by-token streaming terminal output with color
+│   ├── knowledge.py            # Persistent knowledge base (SQLite + fuzzy search)
+│   ├── code_engine.py          # Narrated coding + code planning system
+│   ├── skill_registry.py       # SQLite skill catalog (24+ built-in skills)
+│   ├── skill_acquirer.py       # GitHub/URL skill acquisition via AST parsing
+│   ├── task_planner.py         # 5-stage logical task planner with learning
+│   ├── autonomous_planner.py   # Backward-compat shim → automation/autonomous_planner.py
+│   └── plugins.py              # Plugin architecture and manager
+│
+├── automation/
+│   ├── __init__.py             # Module exports
+│   ├── autonomous_planner.py   # Unified AI+physical planner (calendar, cyber, GUI, shell)
+│   ├── automation.py           # Unified automation entry point (plan→execute→report)
+│   ├── planner.py              # Rule-based task planner (40+ patterns)
+│   ├── executor.py             # Step executor (retry, timeout, dependency resolution)
+│   ├── shell_agent.py          # Shell commands, app launch/kill, file ops (60+ aliases)
+│   ├── gui_agent.py            # Mouse, keyboard, window management, OCR (pyautogui+xdotool)
+│   └── reporter.py             # Real-time step progress display
 │
 ├── voice/
-│   ├── listener.py          # Microphone capture, VAD, phrase detection
-│   ├── wakeword.py          # Custom ONNX wake word detector (hey_nexus.onnx)
-│   ├── speech_to_text.py    # faster-whisper transcription
-│   ├── tts.py               # Text-to-speech (espeak backend)
-│   ├── engine.py            # Voice orchestration loop
-│   └── speaker_id.py        # Speaker identification (SpeechBrain ECAPA-TDNN)
+│   ├── listener.py             # Microphone capture, VAD, phrase detection
+│   ├── wakeword.py             # Custom ONNX wake word detector (hey_nexus.onnx)
+│   ├── speech_to_text.py       # faster-whisper transcription
+│   ├── tts.py                  # Text-to-speech (espeak backend)
+│   ├── engine.py               # Voice orchestration loop
+│   └── speaker_id.py           # Speaker identification (SpeechBrain ECAPA-TDNN)
+│
+├── cyber/
+│   ├── analyzer.py             # Log analyzer & threat detection
+│   ├── cyber.py                # Natural language cyber interface
+│   ├── network.py              # Network intelligence (interfaces, ARP, etc.)
+│   ├── scanner.py              # Port scanner (nmap integration)
+│   ├── toolkit.py              # Tool management & installation
+│   ├── intel.py                # Threat intelligence & OSINT gathering
+│   ├── recon.py                # Passive reconnaissance pipeline
+│   └── sandbox.py              # Sandboxed subprocess execution environment
+│
+├── research/
+│   ├── researcher.py           # Autonomous research pipeline coordinator
+│   ├── searcher.py             # Web search module
+│   ├── fetcher.py              # Web page downloading and HTML parsing
+│   ├── summarizer.py           # Page summarization using local LLM
+│   └── memory.py               # Vector database (ChromaDB) for research retention
+│
+├── vision/
+│   ├── capture.py              # Fast multi-monitor screen capture (MSS)
+│   ├── ocr.py                  # Text extraction from screenshots (Tesseract)
+│   └── monitor.py              # Live screen change & text detection
 │
 ├── models/
 │   ├── wakeword/
-│   │   └── hey_nexus.onnx       # Custom trained wake word model (26.7 KB, self-contained)
-│   └── speaker_id/          # Cached SpeechBrain ECAPA-TDNN weights
+│   │   └── hey_nexus.onnx      # Custom trained wake word model (26.7 KB)
+│   └── speaker_id/             # Cached SpeechBrain ECAPA-TDNN weights
 │
 ├── data/
 │   ├── wakeword/
-│   │   ├── hey_nexus/           # 100 positive WAV samples
-│   │   └── negative/            # 100 negative WAV samples
+│   │   ├── hey_nexus/          # 100 positive WAV samples
+│   │   └── negative/           # 100 negative WAV samples
 │   ├── speaker_profiles/
-│   │   └── owner.npy            # Owner speaker embedding (192-dim)
-│   └── memory.log           # Flat-file memory log
+│   │   └── owner.npy           # Owner speaker embedding (192-dim)
+│   ├── skills/
+│   │   ├── registry.db         # SQLite skill catalog
+│   │   ├── acquired/           # Cloned GitHub repos
+│   │   └── created/            # LLM-generated skill functions
+│   ├── calendar/               # .ics calendar event files (WSL2 fallback)
+│   ├── task_procedures.jsonl   # Learned task procedures (auto-appended on success)
+│   ├── nexus_memory.db         # Main SQLite memory database
+│   └── training_pairs.jsonl    # LLM fine-tuning data pairs
 │
 ├── tools/
-│   ├── record_wakeword.py   # Interactive wake word sample recorder
-│   └── train_wakeword.py    # CNN trainer → ONNX exporter
+│   ├── record_wakeword.py      # Interactive wake word sample recorder
+│   └── train_wakeword.py       # CNN trainer → ONNX exporter
 │
 ├── config/
-│   └── settings.json        # Runtime configuration file
+│   └── settings.json           # Runtime configuration file
 │
 ├── logs/
-│   └── nexus.log            # Rotating log file (DEBUG level)
+│   └── nexus.log               # Rotating log file (DEBUG level)
 │
-├── vision/
-│   ├── capture.py           # Fast multi-monitor screen capture (MSS)
-│   ├── ocr.py               # Text extraction from screenshots (Tesseract)
-│   └── monitor.py           # Live screen change & text detection
-├── research/
-│   ├── researcher.py        # Autonomous research pipeline coordinator
-│   ├── searcher.py          # Web search module
-│   ├── fetcher.py           # Web page downloading and HTML parsing
-│   ├── summarizer.py        # Page summarization using local LLM
-│   └── memory.py            # Vector database (ChromaDB) for research retention
-├── plugins/                 # Modular plugin directory for extensions
-├── cyber/
-│   ├── analyzer.py          # Log analyzer & threat detection
-│   ├── cyber.py             # Natural language cyber interface
-│   ├── network.py           # Network intelligence (interfaces, ARP, etc.)
-│   ├── scanner.py           # Port scanner (nmap integration)
-│   └── toolkit.py           # Tool management & installation
-├── memory/                  # [NOT STARTED]
-├── automation/
-│   ├── automation.py        # Unified automation interface
-│   ├── executor.py          # Task executor
-│   ├── gui_agent.py         # GUI automation
-│   ├── planner.py           # Task planner
-│   ├── reporter.py          # Progress reporter
-│   └── shell_agent.py       # Shell command execution
+├── plugins/                    # Modular plugin directory for extensions
 ├── tests/
 ├── docs/
 │
-├── main.py                  # CLI launcher, banner, REPL, command parser
+├── main.py                     # CLI launcher, banner, REPL, full command parser
 ├── requirements.txt
-├── README.md                # This file — master project tracker
-└── roadmap.md
+└── README.md                   # This file — master project tracker
 ```
 
 ---
 
-# FIRST SUCCESS TARGET
+# CLI COMMAND REFERENCE
 
-The first working version of NEXUS should be able to:
+```
+NEXUS> <natural language>         # Send any message to the brain
+
+BASIC COMMANDS
+  help                            # Show this help
+  status                          # System status overview
+  sysinfo                         # Hardware / OS info
+  modules                         # List loaded modules
+  history                         # In-session command history
+  clear                           # Clear terminal
+  exit / quit                     # Exit NEXUS
+
+VOICE COMMANDS
+  voice                           # Start voice engine loop
+  voice test                      # Microphone RMS meter test
+  voice enroll                    # Enroll speaker profile
+  voice verify <file>             # Verify speaker from audio file
+
+AUTOMATION COMMANDS
+  run <instruction>               # Execute physical/GUI task (Automation pipeline)
+  run --dry <instruction>         # Dry-run (show plan, don't execute)
+  plan <instruction>              # Show automation plan without executing
+  autoplan <goal>                 # Run AutonomousPlanner on a goal
+
+SKILL COMMANDS
+  skills list                     # List all registered skills
+  skills search <query>           # Search skills by keyword
+  skills acquire <url>            # Acquire skills from GitHub repo or URL
+  skills create <description>     # Create a new skill via LLM
+
+TASK PLANNING COMMANDS
+  task <goal>                     # Logically plan and execute a goal
+  code <request>                  # Coding assistant (narrated + streamed)
+
+MEMORY COMMANDS
+  remember <fact>                 # Store a fact in memory
+  recall <query>                  # Search memory
+  forget <query>                  # Remove matching memory entries
+
+CYBERSECURITY COMMANDS (authorized use only)
+  cyber scan <target>             # Port scan a host
+  cyber recon <target>            # Passive reconnaissance
+  cyber osint <target>            # OSINT / threat intelligence lookup
+  cyber analyze <log>             # Log analysis & threat detection
+  cyber cve <keyword>             # CVE lookup
+  cyber exploit <service>         # Exploit search
+  cyber network                   # Show local network info
+```
+
+---
+
+# FIRST SUCCESS TARGET ✅ ACHIEVED
 
 * ~~Launch from terminal~~ ✅
 * ~~Display NEXUS ASCII startup screen~~ ✅
 * ~~Listen for "Hey Nexus"~~ ✅
 * ~~Convert speech to text~~ ✅
 * ~~Respond in terminal / TTS~~ ✅
-* ~~Execute basic local commands~~ ✅ (shell command support)
-* ~~Store simple memory logs~~ ✅ (flat file memory implemented)
+* ~~Execute basic local commands~~ ✅
+* ~~Store simple memory logs~~ ✅
+* ~~Autonomous task planning and execution~~ ✅
+* ~~Self-extending skill system~~ ✅
+* ~~Logical planning from natural language~~ ✅
 
 ---
 
@@ -510,15 +713,23 @@ The first working version of NEXUS should be able to:
 
 ## Current Status
 
-* [DONE] Planning architecture
-* [DONE] Development environment setup (Python venv, Linux, VS Code)
-* [DONE] Initial coding phase (main.py, core/logger.py, core/config.py, voice/listener.py)
-* [DONE] Voice pipeline implementation (microphone ✅, wake word ✅, STT ✅, TTS ✅, engine ✅)
-* [DONE] Custom wake word model — trained locally, 100% val accuracy, live detection confirmed
-* [DONE] Speaker identification system — ECAPA-TDNN enrolled, wired into voice engine
-* [DONE] Cybersecurity module — network scanning, log analysis, and toolkit management implemented
-* [DONE] Automation system — planning and execution of tasks (shell, GUI) implemented
-* [IN PROGRESS] Brain / reasoning / memory integration (Ollama/Mistral via `core/brain.py`)
+* [DONE] Foundation — environment, CLI, config, logging, plugins
+* [DONE] Voice pipeline — microphone, wake word, STT, TTS, speaker ID, engine
+* [DONE] Custom wake word model — trained locally, live detection confirmed
+* [DONE] Speaker identification — ECAPA-TDNN enrolled, wired into voice engine
+* [DONE] Screen & vision — capture, OCR, live monitoring
+* [DONE] Research system — web search, fetcher, summarizer, vector memory
+* [DONE] Cybersecurity module — network, scanner, log analysis, OSINT, recon, sandbox
+* [DONE] Brain / reasoning / memory — Ollama/Mistral, SQLite memory, knowledge base
+* [DONE] Streaming output & code engine — narrated coding, streamed LLM responses
+* [DONE] Input fast-path — normalizer + entry model triage before brain
+* [DONE] Automation system — shell agent, GUI agent, planner, executor, reporter
+* [DONE] Unified autonomous planner — AI reasoning + physical task execution merged
+* [DONE] Skill system — registry (24 skills), acquirer (GitHub/URL), creator (LLM)
+* [DONE] Logical task planner — 5-stage planning with web research and learning
+* [IN PROGRESS] Long-term memory architecture refinement
+* [NOT STARTED] Multi-model collaboration
+* [NOT STARTED] Background daemon mode / hotword wake system
 
 ---
 

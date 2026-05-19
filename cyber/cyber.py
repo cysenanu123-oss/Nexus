@@ -18,6 +18,9 @@ from .toolkit import ToolKit
 from .scanner import PortScanner
 from .network import NetworkIntel
 from .analyzer import LogAnalyzer
+from .intel import CyberIntel
+from .recon import ReconEngine
+from .sandbox import SandboxEngine
 
 
 # ─────────────────────────────────────────────
@@ -127,6 +130,107 @@ INTENT_PATTERNS = [
         "intents": ["help", "what can you do", "commands", "cyber help"],
         "action": "show_help",
     },
+
+    # ── Intel / News ──────────────────────────────────────────
+    {
+        "intents": ["latest news", "cyber news", "hacking news", "security news",
+                    "what's happening", "news feed", "latest hacking", "recent attacks",
+                    "threat intel", "threat intelligence"],
+        "action": "cyber_news",
+    },
+    {
+        "intents": ["cve lookup", "look up cve", "cve info", "cve details",
+                    "what is cve", "tell me about cve", "search cve"],
+        "action": "cve_search",
+        "needs_target": True,
+    },
+    {
+        "intents": ["exploit search", "find exploit", "search exploit", "find exploits",
+                    "exploitdb", "exploit-db", "searchsploit"],
+        "action": "exploit_search",
+        "needs_target": True,
+    },
+    {
+        "intents": ["download exploit", "get exploit", "exploit download", "grab exploit"],
+        "action": "exploit_download",
+        "needs_target": True,
+    },
+    {
+        "intents": ["github advisories", "ghsa", "github security", "github vulns"],
+        "action": "ghsa_search",
+    },
+
+    # ── Recon ─────────────────────────────────────────────────
+    {
+        "intents": ["recon ", "full recon", "reconnaissance", "recon on",
+                    "gather info on", "gather information on", "osint on"],
+        "action": "full_recon",
+        "needs_target": True,
+    },
+    {
+        "intents": ["subdomain", "find subdomains", "enumerate subdomains",
+                    "list subdomains", "sub domains"],
+        "action": "subdomains",
+        "needs_target": True,
+    },
+    {
+        "intents": ["dns records", "dns info", "dns lookup", "check dns",
+                    "whats the dns", "show dns"],
+        "action": "dns_records",
+        "needs_target": True,
+    },
+    {
+        "intents": ["whois", "ip info", "ip information", "who owns", "registrar"],
+        "action": "ip_info",
+        "needs_target": True,
+    },
+    {
+        "intents": ["http headers", "check headers", "web headers", "server headers",
+                    "fingerprint", "what tech", "what technology", "detect tech"],
+        "action": "http_headers",
+        "needs_target": True,
+    },
+    {
+        "intents": ["dir scan", "directory scan", "directory brute", "dirbuster",
+                    "gobuster", "ffuf", "find directories", "find paths"],
+        "action": "dir_bruteforce",
+        "needs_target": True,
+    },
+    {
+        "intents": ["robots.txt", "sitemap", "robots", "check robots"],
+        "action": "robots_sitemap",
+        "needs_target": True,
+    },
+    {
+        "intents": ["authorize target", "add target", "set target", "i have permission",
+                    "authorize ", "give permission", "allowed to test"],
+        "action": "authorize_target",
+        "needs_target": True,
+    },
+    {
+        "intents": ["authorized targets", "show targets", "my targets", "target list"],
+        "action": "list_targets",
+    },
+
+    # ── Sandbox / Vuln Scanning ───────────────────────────────
+    {
+        "intents": ["sandbox", "create sandbox", "clone target", "test in sandbox",
+                    "spin up sandbox", "isolated test", "clone and test"],
+        "action": "create_sandbox",
+        "needs_target": True,
+    },
+    {
+        "intents": ["vuln scan", "vulnerability scan", "check vulnerabilities",
+                    "scan for vulns", "run nuclei", "run nikto", "vuln check"],
+        "action": "vuln_scan",
+        "needs_target": True,
+    },
+    {
+        "intents": ["monitor target", "watch target", "monitor changes", "watch for changes",
+                    "keep watching", "alert me if"],
+        "action": "monitor_target",
+        "needs_target": True,
+    },
 ]
 
 
@@ -137,11 +241,15 @@ class CyberBrain:
     """
 
     def __init__(self, verbose: bool = True):
-        self.verbose = verbose
-        self.tk = ToolKit(verbose=verbose)
-        self.scanner = PortScanner(toolkit=self.tk)
-        self.network = NetworkIntel(toolkit=self.tk)
+        self.verbose  = verbose
+        self.tk       = ToolKit(verbose=verbose)
+        self.scanner  = PortScanner(toolkit=self.tk)
+        self.network  = NetworkIntel(toolkit=self.tk)
         self.analyzer = LogAnalyzer(toolkit=self.tk)
+        self.intel    = CyberIntel()
+        self.recon    = ReconEngine()
+        self.sandbox  = SandboxEngine()
+        self._last_scan_results: Optional[dict] = None
 
     # ─────────────────────────────────────────
     #  MAIN ENTRY POINT
@@ -190,23 +298,50 @@ class CyberBrain:
         return best_match
 
     def _extract_target(self, cmd: str) -> Optional[str]:
-        """Extract IP, hostname, CIDR, or tool name from command."""
-        # IP address
+        """Extract IP, hostname, URL, CIDR, CVE ID, EDB ID, or tool name from command."""
+        # CVE ID
+        cve_match = re.search(r"\b(cve[-\s]?\d{4}[-\s]?\d+)\b", cmd, re.I)
+        if cve_match:
+            return cve_match.group(1)
+
+        # EDB / exploit ID
+        edb_match = re.search(r"\bedb[-\s]?(\d+)\b|\bexploit\s+(\d+)\b", cmd, re.I)
+        if edb_match:
+            return edb_match.group(1) or edb_match.group(2)
+
+        # Full URL
+        url_match = re.search(r"(https?://[^\s]+)", cmd)
+        if url_match:
+            return url_match.group(1)
+
+        # IP address / CIDR
         ip_match = re.search(r"\b(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}(?:/\d{1,2})?)\b", cmd)
         if ip_match:
             return ip_match.group(1)
 
-        # CIDR range
-        cidr_match = re.search(r"\b(\d+\.\d+\.\d+\.\d+/\d+)\b", cmd)
-        if cidr_match:
-            return cidr_match.group(1)
-
-        # Hostname (simple heuristic)
+        # Domain name (broad match for recon targets)
         hostname_match = re.search(
-            r"(?:on|scan|check|for)\s+([a-zA-Z0-9][a-zA-Z0-9\-\.]+\.[a-zA-Z]{2,})\b", cmd
+            r"(?:on|for|scan|check|recon|authorize|test|monitor|sandbox|"
+            r"subdomains?|whois|dns|http|fingerprint)\s+([a-zA-Z0-9][a-zA-Z0-9\-\.]+\.[a-zA-Z]{2,})\b",
+            cmd,
         )
         if hostname_match:
             return hostname_match.group(1)
+
+        # Any bare domain-like word at the end
+        bare_domain = re.search(
+            r"\s([a-zA-Z0-9][a-zA-Z0-9\-]+\.[a-zA-Z]{2,}(?:\.[a-zA-Z]{2,})?)\s*$", cmd
+        )
+        if bare_domain:
+            return bare_domain.group(1)
+
+        # Keyword/phrase target (for exploit search, cve search, news source)
+        kw_match = re.search(
+            r"(?:search|find|about|for|exploit|download|lookup|news from|from)\s+(.+)$",
+            cmd,
+        )
+        if kw_match:
+            return kw_match.group(1).strip()
 
         # Tool name (for install / recommend)
         tool_match = re.search(r"(?:install|download|for)\s+([a-zA-Z0-9_\-]+)", cmd)
@@ -235,6 +370,7 @@ class CyberBrain:
             if not target:
                 return "[!] Please specify a target IP or hostname.\n    Example: scan ports on 192.168.1.1"
             results = self.scanner.scan_target(target)
+            self._last_scan_results = results
             return self.scanner.format_results(results)
 
         if action == "quick_scan":
@@ -377,6 +513,95 @@ class CyberBrain:
         if action == "show_help":
             return self._help_text()
 
+        # ── Intel / News ──────────────────────────────────────
+        if action == "cyber_news":
+            source = target if target in ("hackernews", "krebs", "bleeping", "sans", "cisa") else "all"
+            return self.intel.latest_news(limit=8, source=source)
+
+        if action == "cve_search":
+            if not target:
+                return "[!] Specify a CVE ID or keyword. Example: cve lookup apache 2.4"
+            if re.match(r"^cve[-\s]?\d{4}[-\s]?\d+$", target, re.I):
+                return self.intel.cve_lookup(target)
+            return self.intel.cve_search(target)
+
+        if action == "exploit_search":
+            if not target:
+                return "[!] Specify a search term. Example: find exploit vsftpd 2.3.4"
+            return self.intel.exploit_search(target)
+
+        if action == "exploit_download":
+            if not target:
+                return "[!] Specify an EDB ID. Example: download exploit 47887"
+            edb_id = re.search(r"\d+", target)
+            if not edb_id:
+                return "[!] Could not extract EDB ID from: " + target
+            return self.intel.exploit_download(edb_id.group())
+
+        if action == "ghsa_search":
+            ecosystem = target or ""
+            return self.intel.ghsa_search(ecosystem=ecosystem)
+
+        # ── Recon ─────────────────────────────────────────────
+        if action == "full_recon":
+            if not target:
+                return "[!] Specify a target domain. Example: recon on example.com"
+            return self.recon.full_recon(target)
+
+        if action == "subdomains":
+            if not target:
+                return "[!] Specify a domain. Example: find subdomains example.com"
+            return self.recon.subdomains(target)
+
+        if action == "dns_records":
+            if not target:
+                return "[!] Specify a domain. Example: dns records example.com"
+            return self.recon.dns_records(target)
+
+        if action == "ip_info":
+            if not target:
+                return "[!] Specify a target. Example: whois example.com"
+            return self.recon.ip_info(target)
+
+        if action == "http_headers":
+            if not target:
+                return "[!] Specify a URL or domain."
+            return self.recon.http_headers(target)
+
+        if action == "dir_bruteforce":
+            if not target:
+                return "[!] Specify a URL. Example: dir scan example.com"
+            return self.recon.dir_bruteforce(target)
+
+        if action == "robots_sitemap":
+            if not target:
+                return "[!] Specify a domain."
+            return self.recon.robots_sitemap(target)
+
+        if action == "authorize_target":
+            if not target:
+                return "[!] Specify a target to authorize. Example: authorize example.com"
+            return self.recon.authorize(target)
+
+        if action == "list_targets":
+            return self.recon.list_authorized()
+
+        # ── Sandbox / Vuln ────────────────────────────────────
+        if action == "create_sandbox":
+            if not target:
+                return "[!] Specify a target. Example: sandbox 192.168.1.1"
+            return self.sandbox.create_and_test(target, self._last_scan_results)
+
+        if action == "vuln_scan":
+            if not target:
+                return "[!] Specify a target. Example: vuln scan 192.168.1.1"
+            return self.sandbox.vulnerability_scan(target)
+
+        if action == "monitor_target":
+            if not target:
+                return "[!] Specify a target. Example: monitor target 192.168.1.1"
+            return self.sandbox.monitor_target(target)
+
         return f"[!] Unknown action: {action}"
 
     # ─────────────────────────────────────────
@@ -432,41 +657,66 @@ class CyberBrain:
 
     def _help_text(self) -> str:
         return """
-╔═══════════════════════════════════════════════════════╗
-║            NEXUS CYBERSECURITY COMMANDS               ║
-╚═══════════════════════════════════════════════════════╝
+╔═══════════════════════════════════════════════════════════════╗
+║               NEXUS CYBERSECURITY COMMANDS                    ║
+╚═══════════════════════════════════════════════════════════════╝
 
   NETWORK SCANNING
-  ─────────────────────────────────────────────────────
+  ──────────────────────────────────────────────────────────
   scan my network                 Full scan: interfaces + hosts + ports
-  what devices are on my network  ARP host discovery only
   scan ports on 192.168.1.1       Targeted port scan
-  quick scan 192.168.1.1          Fast top-100 ports scan
-  full scan 192.168.1.1           Deep scan, all ports + services
+  quick scan 192.168.1.1          Fast top-100 ports
+  full scan 192.168.1.1           Deep scan, all ports + service detection
   stealth scan 192.168.1.1        SYN stealth scan (needs root)
 
+  RECON & OSINT  (authorize target first!)
+  ──────────────────────────────────────────────────────────
+  authorize example.com           Add to authorized scope
+  show authorized targets         List authorized targets
+  recon on example.com            Full recon pipeline (DNS+IP+HTTP+subs)
+  find subdomains example.com     Passive + active subdomain enum
+  dns records example.com         DNS A/MX/TXT/NS/CNAME/SOA
+  whois example.com               IP geolocation + WHOIS
+  http headers example.com        Headers + tech fingerprint + sec grade
+  dir scan example.com            Directory brute-force (ffuf/gobuster/python)
+  robots.txt example.com          Fetch robots.txt and sitemap
+
+  VULNERABILITY SCANNING & SANDBOX
+  ──────────────────────────────────────────────────────────
+  vuln scan 192.168.1.1           Nuclei + Nikto + nmap-vuln scripts
+  sandbox 192.168.1.1             Clone services → Docker sandbox → vuln test
+  monitor target 192.168.1.1      Watch for port/service changes
+
+  THREAT INTELLIGENCE
+  ──────────────────────────────────────────────────────────
+  latest cyber news               Headlines from THN, Krebs, SANS, CISA
+  cve lookup CVE-2024-1234        Full CVE details from NVD
+  search cve apache               Search NVD for CVEs matching keyword
+  find exploit vsftpd 2.3.4       Search Exploit-DB / searchsploit
+  download exploit 47887          Download EDB exploit to data/exploits/
+  github advisories               Latest GHSA critical advisories
+
   NETWORK INTELLIGENCE
-  ─────────────────────────────────────────────────────
+  ──────────────────────────────────────────────────────────
   show interfaces                 All network interfaces + IPs
   my external ip                  Public IP address
-  show arp table                  Current ARP cache
-  active connections              Established TCP/UDP connections
+  show arp table                  ARP cache
+  active connections              Established connections
   show routing table              IP routes
-  my subnet                       Local CIDR range
 
-  LOG ANALYSIS & THREAT DETECTION
-  ─────────────────────────────────────────────────────
+  LOG ANALYSIS & DEFENSE
+  ──────────────────────────────────────────────────────────
   check for suspicious activity   Full 24h security analysis
-  show failed logins              Brute force + login attempts
-  check suspicious processes      Scan for reverse shells, miners
-  active sessions                 Who is currently logged in
-  check listening ports           What services are listening
+  show failed logins              Brute force + SSH attacks
+  check suspicious processes      Reverse shells, miners
+  active sessions                 Who is logged in
+  check listening ports           Services + suspicious ports
 
-  TOOLKIT MANAGEMENT
-  ─────────────────────────────────────────────────────
+  TOOLKIT
+  ──────────────────────────────────────────────────────────
   show toolkit status             All tools + install status
   install nmap                    Auto-install a tool
-  best tool for port scanning     Get tool recommendations
+  best tool for port scanning     Tool recommendations
 
-═══════════════════════════════════════════════════════
+═══════════════════════════════════════════════════════════════
 """

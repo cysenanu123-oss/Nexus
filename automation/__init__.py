@@ -26,10 +26,11 @@ Quick usage:
     print(result.summary())
 """
 
-from automation.automation import Automation
-from automation.planner    import TaskPlanner, ExecutionPlan, Step
-from automation.executor   import Executor, ExecutionResult
-from automation.reporter   import Reporter
+from automation.automation          import Automation
+from automation.planner             import TaskPlanner, ExecutionPlan, Step
+from automation.executor            import Executor, ExecutionResult
+from automation.reporter            import Reporter
+from automation.autonomous_planner  import AutonomousPlanner, AutonomousPlan, AStep
 
 __all__ = [
     "Automation",
@@ -39,4 +40,7 @@ __all__ = [
     "Executor",
     "ExecutionResult",
     "Reporter",
+    "AutonomousPlanner",
+    "AutonomousPlan",
+    "AStep",
 ]

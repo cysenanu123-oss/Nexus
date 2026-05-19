@@ -76,13 +76,17 @@ class Printer:
     """Formatted terminal output for NEXUS."""
 
     PREFIX = {
-        "info":    f"{Color.BRIGHT_CYAN}[INFO]{Color.RESET}",
-        "ok":      f"{Color.BRIGHT_GREEN}[ OK ]{Color.RESET}",
-        "warn":    f"{Color.BRIGHT_YELLOW}[WARN]{Color.RESET}",
-        "error":   f"{Color.BRIGHT_RED}[FAIL]{Color.RESET}",
-        "cmd":     f"{Color.BRIGHT_MAGENTA}[ >> ]{Color.RESET}",
-        "system":  f"{Color.BRIGHT_BLUE}[ SYS]{Color.RESET}",
-        "nexus":   f"{Color.BRIGHT_GREEN}[NEXUS]{Color.RESET}",
+        "info":     f"{Color.BRIGHT_CYAN}[INFO]{Color.RESET}",
+        "ok":       f"{Color.BRIGHT_GREEN}[ OK ]{Color.RESET}",
+        "warn":     f"{Color.BRIGHT_YELLOW}[WARN]{Color.RESET}",
+        "error":    f"{Color.BRIGHT_RED}[FAIL]{Color.RESET}",
+        "cmd":      f"{Color.BRIGHT_MAGENTA}[ >> ]{Color.RESET}",
+        "system":   f"{Color.BRIGHT_BLUE}[ SYS]{Color.RESET}",
+        "nexus":    f"{Color.BRIGHT_GREEN}[NEXUS]{Color.RESET}",
+        "thinking": f"{Color.BRIGHT_YELLOW}[ ◆  ]{Color.RESET}",
+        "reading":  f"{Color.BRIGHT_CYAN}[ ↳  ]{Color.RESET}",
+        "editing":  f"{Color.BRIGHT_MAGENTA}[ ✎  ]{Color.RESET}",
+        "learned":  f"{Color.BRIGHT_GREEN}[ ★  ]{Color.RESET}",
     }
 
     @staticmethod
@@ -116,6 +120,25 @@ class Printer:
     @classmethod
     def nexus(cls, msg: str):
         print(f"{cls._ts()} {cls.PREFIX['nexus']} {Color.BRIGHT_WHITE}{msg}{Color.RESET}")
+
+    @classmethod
+    def thinking(cls, msg: str):
+        print(f"{cls._ts()} {cls.PREFIX['thinking']} {Color.BRIGHT_YELLOW}{msg}{Color.RESET}")
+
+    @classmethod
+    def reading(cls, path: str, detail: str = ""):
+        detail_part = f"  {Color.DIM}{detail}{Color.RESET}" if detail else ""
+        print(f"{cls._ts()} {cls.PREFIX['reading']} {Color.BRIGHT_CYAN}{path}{Color.RESET}{detail_part}")
+
+    @classmethod
+    def editing(cls, path: str, detail: str = ""):
+        detail_part = f"  {Color.DIM}{detail}{Color.RESET}" if detail else ""
+        print(f"{cls._ts()} {cls.PREFIX['editing']} {Color.BRIGHT_MAGENTA}{path}{Color.RESET}{detail_part}")
+
+    @classmethod
+    def learned(cls, topic: str, detail: str = ""):
+        detail_part = f"  {Color.DIM}{detail}{Color.RESET}" if detail else ""
+        print(f"{cls._ts()} {cls.PREFIX['learned']} {Color.BRIGHT_GREEN}{topic}{Color.RESET}{detail_part}")
 
     @staticmethod
     def divider(char: str = "─", width: Optional[int] = None):
@@ -253,8 +276,39 @@ HELP_TEXT = f"""
   {Color.BRIGHT_CYAN}echo <text>{Color.RESET}            Echo text back to the terminal
   {Color.BRIGHT_CYAN}history{Color.RESET}                Show command history for this session
   {Color.BRIGHT_CYAN}exit / quit{Color.RESET}            Shutdown NEXUS
+  {Color.BRIGHT_CYAN}knowledge{Color.RESET}              Show knowledge base stats and recent entries
+  {Color.BRIGHT_CYAN}learn <topic>{Color.RESET}          Go online, learn about topic, store to KB
+  {Color.BRIGHT_CYAN}plan <task>{Color.RESET}            Show a detailed code change plan for a task
+  {Color.BRIGHT_CYAN}read <file>{Color.RESET}            Read and analyse a project file
 
-{Color.DIM}Phase 2+ commands (voice, vision, memory) will be added as modules are built.{Color.RESET}
+{Color.BRIGHT_RED}{Color.BOLD}CYBER COMMANDS (just say them naturally){Color.RESET}
+  {Color.BRIGHT_RED}latest cyber news{Color.RESET}       Headlines from THN, Krebs, SANS, CISA, Exploit-DB
+  {Color.BRIGHT_RED}cve lookup CVE-2024-1234{Color.RESET}  NVD CVE details + CVSS score
+  {Color.BRIGHT_RED}search cve apache{Color.RESET}       Search NVD for matching CVEs
+  {Color.BRIGHT_RED}find exploit vsftpd{Color.RESET}     Exploit-DB / searchsploit search
+  {Color.BRIGHT_RED}download exploit 47887{Color.RESET}  Download exploit to data/exploits/
+  {Color.BRIGHT_RED}authorize example.com{Color.RESET}   Add domain to authorized recon scope
+  {Color.BRIGHT_RED}recon on example.com{Color.RESET}    Full recon: DNS, IP, headers, subdomains
+  {Color.BRIGHT_RED}find subdomains example.com{Color.RESET}  Passive + active subdomain enum
+  {Color.BRIGHT_RED}vuln scan 192.168.1.1{Color.RESET}   Nuclei + Nikto + nmap vuln scripts
+  {Color.BRIGHT_RED}sandbox 192.168.1.1{Color.RESET}     Clone services → isolated vuln test
+  {Color.BRIGHT_RED}monitor target 192.168.1.1{Color.RESET}  Watch for port/service changes
+  {Color.BRIGHT_RED}cyber help{Color.RESET}              Full cyber command reference
+
+{Color.BRIGHT_MAGENTA}{Color.BOLD}SKILL & TASK COMMANDS{Color.RESET}
+  {Color.BRIGHT_MAGENTA}skills{Color.RESET}                 List all registered skills (builtin + acquired + created)
+  {Color.BRIGHT_MAGENTA}skills search <q>{Color.RESET}      Find skills matching a query
+  {Color.BRIGHT_MAGENTA}skills acquire <url>{Color.RESET}   Clone a GitHub repo → extract + register skills
+  {Color.BRIGHT_MAGENTA}skills create <desc>{Color.RESET}   Ask LLM to write and register a new skill
+  {Color.BRIGHT_MAGENTA}task <description>{Color.RESET}     Run the task planner on any arbitrary task
+
+  {Color.DIM}Natural language equivalents (just say them):{Color.RESET}
+  {Color.BRIGHT_MAGENTA}acquire skill from https://github.com/...{Color.RESET}
+  {Color.BRIGHT_MAGENTA}create a skill to send emails via Gmail{Color.RESET}
+  {Color.BRIGHT_MAGENTA}list my skills{Color.RESET}
+  {Color.BRIGHT_MAGENTA}search skills for email{Color.RESET}
+
+{Color.DIM}Say anything else and NEXUS routes it through brain → LLM → web research.{Color.RESET}
 """
 
 # Module registry — expands as phases are completed
@@ -267,8 +321,9 @@ MODULE_REGISTRY = {
     "llm":         {"status": "NOT STARTED", "desc": "Local LLM inference"},
     "memory":      {"status": "NOT STARTED", "desc": "Short & long-term memory"},
     "research":    {"status": "NOT STARTED", "desc": "Self-learning & research"},
-    "cyber":       {"status": "ACTIVE",      "desc": "Cybersecurity tools (scanner, network intel, log analyzer, toolkit)"},
-    "coding":      {"status": "NOT STARTED", "desc": "Coding assistant"},
+    "cyber":       {"status": "ACTIVE",      "desc": "Scanning, recon, vuln scan, sandbox, threat intel, CVE/exploit search, news"},
+    "coding":      {"status": "ACTIVE",      "desc": "Code engine — narrated planning, file analysis, self-learning"},
+    "skills":      {"status": "ACTIVE",      "desc": "Skill registry, acquirer, task planner — learn/create/invoke skills"},
     "security":    {"status": "NOT STARTED", "desc": "Permissions & auth"},
 }
 
@@ -382,6 +437,139 @@ def cmd_shell(args: list[str]):
         Printer.error(f"Shell error: {exc}")
 
 
+def cmd_knowledge(brain=None):
+    """Show knowledge base stats and recent entries."""
+    try:
+        from core.knowledge import get_knowledge_base
+        kb = get_knowledge_base()
+        stats = kb.stats()
+        Printer.blank()
+        Printer.system(f"Knowledge Base — {stats['total']} entries")
+        Printer.divider()
+        for source, count in stats.get("by_source", {}).items():
+            print(f"  {Color.BRIGHT_CYAN}{source:<20}{Color.RESET} {count} entries")
+        Printer.blank()
+        recent = kb.get_recent(5)
+        if recent:
+            Printer.info("Recent entries:")
+            for entry in recent:
+                topic = entry["topic"][:50]
+                date  = entry["created"][:10]
+                print(f"  {Color.DIM}{date}{Color.RESET}  {Color.BRIGHT_WHITE}{topic}{Color.RESET}")
+        Printer.blank()
+    except Exception as exc:
+        Printer.error(f"Knowledge base error: {exc}")
+
+
+def cmd_learn(args: list[str], brain=None):
+    """Go online, learn about a topic, store to knowledge base."""
+    if not args:
+        Printer.error("Usage: learn <topic>")
+        return
+    topic = " ".join(args)
+    if brain and brain._code_engine:
+        Printer.info(f"Going online to learn about: {topic}")
+        result = brain._code_engine.search_and_learn(topic)
+        if result:
+            Printer.nexus(result[:500] + ("..." if len(result) > 500 else ""))
+        else:
+            Printer.warn("Could not retrieve information online.")
+    else:
+        Printer.warn("Code engine or researcher not available.")
+
+
+def cmd_plan(args: list[str], brain=None):
+    """Show a detailed narrated plan for a coding task."""
+    if not args:
+        Printer.error("Usage: plan <task description>")
+        return
+    task = " ".join(args)
+    if brain and brain._code_engine:
+        result = brain._code_engine.work(task)
+        Printer.blank()
+        Printer.nexus(result)
+    else:
+        Printer.warn("Code engine not available.")
+
+
+def cmd_read_file(args: list[str], brain=None):
+    """Read and analyse a project file."""
+    if not args:
+        Printer.error("Usage: read <file>")
+        return
+    path = args[0]
+    if brain and brain._code_engine:
+        content = brain._code_engine.read_file(path)
+        if content:
+            Printer.blank()
+            print(content)
+            Printer.blank()
+            info = brain._code_engine.analyze_file(path)
+            Printer.info(info.describe())
+    else:
+        # Fallback: just cat the file
+        cmd_shell(["cat", path])
+
+
+def cmd_skills(args: list[str], brain=None):
+    """List, search, acquire, or create skills."""
+    if not args:
+        # Default: list all
+        if brain and brain._skill_registry:
+            print(brain._cmd_list_skills())
+        else:
+            Printer.warn("Skill registry not available.")
+        return
+
+    sub = args[0].lower()
+
+    if sub in ("list", "all"):
+        if brain:
+            print(brain._cmd_list_skills())
+
+    elif sub == "search" and len(args) > 1:
+        query = " ".join(args[1:])
+        if brain:
+            print(brain._cmd_search_skills(query))
+
+    elif sub in ("acquire", "from", "learn") and len(args) > 1:
+        url = args[1]
+        if brain:
+            result = brain._cmd_acquire_skill(f"acquire skill from {url}")
+            Printer.nexus(result)
+        else:
+            Printer.warn("Brain not available.")
+
+    elif sub == "create" and len(args) > 1:
+        desc = " ".join(args[1:])
+        if brain:
+            result = brain._cmd_create_skill(f"create a skill to {desc}")
+            Printer.nexus(result)
+        else:
+            Printer.warn("Brain not available.")
+
+    else:
+        Printer.info("Skills sub-commands:")
+        print("  skills list             — list all skills")
+        print("  skills search <query>   — find matching skills")
+        print("  skills acquire <url>    — clone a GitHub repo and extract skills")
+        print("  skills create <desc>    — create a new skill with LLM")
+
+
+def cmd_task(args: list[str], brain=None):
+    """Run the task planner on an arbitrary task."""
+    if not args:
+        Printer.error("Usage: task <description>")
+        return
+    task = " ".join(args)
+    if brain and brain._task_planner:
+        result = brain._task_planner.plan_and_execute(task)
+        Printer.blank()
+        Printer.nexus(result)
+    else:
+        Printer.warn("Task planner not available.")
+
+
 def cmd_history(history: list[str]):
     if not history:
         Printer.info("No commands in session history yet.")
@@ -413,20 +601,27 @@ def parse_and_dispatch(raw: str, history: list[str], voice_engine=None, brain=No
     args   = parts[1:]
 
     dispatch = {
-        "help":    lambda: cmd_help(),
-        "?":       lambda: cmd_help(),
-        "status":  lambda: cmd_status(),
-        "version": lambda: cmd_version(),
-        "sysinfo": lambda: cmd_sysinfo(),
-        "modules": lambda: cmd_modules(),
-        "clear":   lambda: os.system("clear" if platform.system() != "Windows" else "cls"),
-        "echo":    lambda: print(" ".join(args)),
-        "run":     lambda: cmd_run(args),
-        "voice":   lambda: voice_engine.trigger() if voice_engine else Printer.error("Voice Engine not initialized"),
-        "shell":   lambda: cmd_shell(args),
-        "history": lambda: cmd_history(history),
-        "exit":    None,
-        "quit":    None,
+        "help":      lambda: cmd_help(),
+        "?":         lambda: cmd_help(),
+        "status":    lambda: cmd_status(),
+        "version":   lambda: cmd_version(),
+        "sysinfo":   lambda: cmd_sysinfo(),
+        "modules":   lambda: cmd_modules(),
+        "clear":     lambda: os.system("clear" if platform.system() != "Windows" else "cls"),
+        "echo":      lambda: print(" ".join(args)),
+        "run":       lambda: cmd_run(args),
+        "voice":     lambda: voice_engine.trigger() if voice_engine else Printer.error("Voice Engine not initialized"),
+        "shell":     lambda: cmd_shell(args),
+        "history":   lambda: cmd_history(history),
+        "knowledge": lambda: cmd_knowledge(brain=brain),
+        "learn":     lambda: cmd_learn(args, brain=brain),
+        "plan":      lambda: cmd_plan(args, brain=brain),
+        "read":      lambda: cmd_read_file(args, brain=brain),
+        "skills":    lambda: cmd_skills(args, brain=brain),
+        "skill":     lambda: cmd_skills(args, brain=brain),
+        "task":      lambda: cmd_task(args, brain=brain),
+        "exit":      None,
+        "quit":      None,
     }
 
     if cmd in ("exit", "quit"):
@@ -500,11 +695,15 @@ def main():
     brain    = Brain(user_name="Senanu")
     speaker  = Speaker()
 
-    voice_engine = VoiceEngine(
-        command_callback=lambda text:
-            parse_and_dispatch(text, session_history, voice_engine, brain=brain, speaker=speaker, is_voice=True)
-    )
-    voice_engine.start()
+    voice_engine = None
+    try:
+        voice_engine = VoiceEngine(
+            command_callback=lambda text:
+                parse_and_dispatch(text, session_history, voice_engine, brain=brain, speaker=speaker, is_voice=True)
+        )
+        voice_engine.start()
+    except Exception as e:
+        Printer.warn(f"Voice engine unavailable ({e}) — running in text-only mode.")
 
     while True:
         try:
@@ -520,7 +719,8 @@ def main():
             break
 
     speaker.shutdown()
-    voice_engine.stop()
+    if voice_engine is not None:
+        voice_engine.stop()
 
 
 if __name__ == "__main__":
