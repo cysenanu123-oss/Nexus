@@ -66,11 +66,10 @@ def _espeak_say(text: str):
         capture_output=True,
     )
 
-    # Read and play through sounddevice, matching the ALSA session
+    # Play audio — try sounddevice first, fall back to aplay (covers WSL2)
     try:
         fs, data = wavfile.read(wav_path)
-        
-        # Resample to 44100 Hz since the hardware ALSA device doesn't support 22050 Hz natively
+
         target_fs = 44100
         if fs != target_fs:
             from scipy.signal import resample
@@ -78,10 +77,21 @@ def _espeak_say(text: str):
             data = resample(data, num_samples)
             fs = target_fs
 
-        sd.play(data, fs)
-        sd.wait()
+        try:
+            sd.play(data, fs)
+            sd.wait()
+        except Exception:
+            # sounddevice unavailable (WSL2, headless) — fall back to aplay
+            if shutil.which("aplay"):
+                subprocess.run(["aplay", "-q", wav_path],
+                               capture_output=True, check=False)
+            elif shutil.which("paplay"):
+                subprocess.run(["paplay", wav_path],
+                               capture_output=True, check=False)
+            else:
+                log.debug("No audio output available — TTS skipped (WSL2/headless).")
     except Exception as e:
-        log.error(f"Failed to play TTS audio: {e}")
+        log.warning("TTS playback skipped: %s", e)
 
 
 # ─────────────────────────────────────────────

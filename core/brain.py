@@ -322,8 +322,26 @@ class Brain:
         "monitor target", "watch target",
     )
 
+    _GREETINGS = frozenset({
+        "hi", "hey", "hello", "yo", "sup", "howdy", "hiya",
+        "morning", "evening", "afternoon",
+        "good morning", "good evening", "good afternoon", "good night",
+        "how are you", "how are you doing", "how's it going",
+        "what's up", "whats up", "how do you do",
+        "thanks", "thank you", "cheers", "ok", "okay", "sure", "alright",
+        "bye", "goodbye", "see you", "later",
+    })
+
     def _route(self, text, intent, decision) -> str:
         t_lower = text.lower()
+
+        # ── Greetings / pure conversational → skip all pipelines ─────────
+        clean = t_lower.strip("!?.,;:")
+        if clean in self._GREETINGS or (len(text.split()) <= 2 and not any(
+            c in t_lower for c in ("scan", "run", "open", "search", "find",
+                                   "show", "list", "get", "set", "do")
+        )):
+            return self.convo.respond(text)
 
         # ── Skill commands fast-path ──────────────────────────────────────
         if any(t in t_lower for t in ("acquire skill", "learn from", "clone skill",
@@ -738,7 +756,17 @@ class Brain:
                 log.warning(f"Stage 2 failed: {e}")
 
         # ── Stage 3: Go online (research module) ──────────────────
-        if self.researcher:
+        # Skip for short/conversational inputs — researcher will return
+        # off-topic dictionary/web results for greetings and simple phrases.
+        _research_worthy = (
+            len(text.split()) >= 4 or
+            any(text.lower().startswith(kw) for kw in (
+                "what", "why", "how", "when", "where", "who", "which",
+                "explain", "tell me", "search", "find", "look up", "research",
+                "is there", "are there", "can you", "could you",
+            ))
+        )
+        if self.researcher and _research_worthy:
             log.info("Stage 3: Research fallback — going online")
             try:
                 response = self.researcher.answer(text)
