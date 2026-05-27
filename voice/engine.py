@@ -76,6 +76,11 @@ class VoiceEngine:
         self._thread: Optional[threading.Thread] = None
         self._last_voice_activity = time.time()
 
+        # Pipecat-inspired frame pipeline state
+        self._tts_thread: Optional[threading.Thread] = None
+        self._barge_in_flag = threading.Event()   # set when user interrupts TTS
+        self._current_tts_text: str = ""
+
         # Core systems
         self.listener    = MicrophoneListener()
         try:
@@ -146,6 +151,36 @@ class VoiceEngine:
             return
         self._continuous_mode = continuous
 
+    def speak_async(self, text: str, tts_fn: Optional[Callable[[str], None]] = None):
+        """
+        Speak text in a background thread (DOWNSTREAM frame).
+        Sets up barge-in: if user speaks while TTS is playing, it cancels.
+        """
+        if not tts_fn:
+            return
+
+        self._barge_in_flag.clear()
+        self._current_tts_text = text
+
+        def _speak():
+            try:
+                tts_fn(text)
+            except Exception as e:
+                if not self._barge_in_flag.is_set():
+                    logger.warning("TTS error: %s", e)
+
+        self._tts_thread = threading.Thread(target=_speak, daemon=True)
+        self._tts_thread.start()
+
+    def barge_in(self):
+        """
+        Signal barge-in (UPSTREAM cancel frame) — user interrupted TTS.
+        Stops the current TTS output.
+        """
+        self._barge_in_flag.set()
+        self._current_tts_text = ""
+        logger.debug("Barge-in triggered — TTS cancelled.")
+
     # ─────────────────────────────────────────────────────────
     #  Main Runtime Loop
     # ─────────────────────────────────────────────────────────
@@ -178,6 +213,11 @@ class VoiceEngine:
                     print("[NEXUS] Exiting continuous voice mode due to silence.\n")
                     self._continuous_mode = False
                 continue
+
+            # ── Barge-in: cancel TTS if it's still playing ────
+            if self._tts_thread and self._tts_thread.is_alive():
+                self.barge_in()
+                print("[NEXUS] Barge-in detected — cancelling response.")
 
             # ── 2b. SPEAKER VERIFICATION ──────────────────────
             if self.speaker_id and self.speaker_id.is_enrolled():

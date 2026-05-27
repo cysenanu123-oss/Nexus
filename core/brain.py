@@ -39,6 +39,10 @@ from core.conversation_session import ConversationSessionManager
 from core.action_extractor     import ActionExtractor
 from core.knowledge_graph      import KnowledgeGraph
 from core.trends               import TrendsTracker
+from core.reflexion            import ReflexionEngine
+from core.sleep_compute        import SleepCompute
+from core.self_refine          import SelfRefine
+from core.orchestrator         import Orchestrator
 
 log = logging.getLogger("nexus.brain")
 
@@ -169,6 +173,18 @@ class Brain:
         self.kg           = KnowledgeGraph(llm=self.llm)
         self.trends       = TrendsTracker()
 
+        # ── AI Engineering curriculum upgrades ───────────────────────────
+        self.reflexion   = ReflexionEngine(llm=self.llm)
+        self.self_refine = SelfRefine(llm=self.llm)
+        self.orchestrator = Orchestrator(llm=self.llm,
+                                         researcher=self.researcher,
+                                         memory=self.memory)
+        self.sleep_compute = SleepCompute(
+            memory=self.memory, llm=self.llm, kg=self.kg,
+            session_mgr=self.session_mgr
+        )
+        self.sleep_compute.start()
+
         log.info("Brain ready.")
 
     # ─────────────────────────────────────────────
@@ -185,6 +201,7 @@ class Brain:
 
         # ── Session + trends tracking ─────────────────────────────────────
         self.session_mgr.add_turn("user", text)
+        self.sleep_compute.ping()
 
         # ── Stage 0: Normalize + Entry Model ─────────────────────────────
         ni = self._normalizer.normalize(text)
@@ -366,6 +383,44 @@ class Brain:
             for s in sessions:
                 lines.append(f"  {s['started_str']} — {s['duration_min']}min, {s['command_count']} commands ({s['top_intent']})")
             return "\n".join(lines)
+
+        # ── Reflexion commands ────────────────────────────────────────────
+        if t_lower.strip() in ("reflections", "my reflections", "what have i taught you"):
+            refs = self.reflexion.all_reflections(limit=10)
+            if not refs:
+                return "No reflections stored yet. Use 'mark bad [correction]' after a wrong response."
+            lines = ["── Stored Reflections ─────────────────────"]
+            for r in refs:
+                lines.append(f"  #{r['id']} [{r['times_used']}x used] {r['reflection'][:100]}")
+            return "\n".join(lines)
+
+        # ── Sleep compute / memory blocks ────────────────────────────────
+        if t_lower.strip() in ("memory blocks", "who am i", "what do you know about me"):
+            blocks = self.sleep_compute.all_blocks()
+            lines = ["── NEXUS Memory Blocks ────────────────────"]
+            for label, value in blocks.items():
+                if value.strip():
+                    lines.append(f"\n[{label.upper()}]\n{value}")
+            return "\n".join(lines) if len(lines) > 1 else "Memory blocks are empty."
+
+        if t_lower.strip() in ("consolidate", "run sleep compute", "update memory"):
+            self.sleep_compute.consolidate()
+            return "Memory consolidation complete. Blocks updated."
+
+        # ── Orchestrator ─────────────────────────────────────────────────
+        if t_lower.startswith("orchestrate ") or t_lower.startswith("multi-agent "):
+            query = text.split(None, 1)[1]
+            return self.orchestrator.run(query)
+
+        # ── Self-refine ──────────────────────────────────────────────────
+        if t_lower.startswith("refine code ") or t_lower.startswith("fix code "):
+            task = text.split(None, 2)[2] if len(text.split()) > 2 else text
+            return self.self_refine.refine_code(task)
+
+        if t_lower.startswith("refine "):
+            task = text[7:].strip()
+            initial = self._understand(task, self.intent_eng.parse(task))
+            return self.self_refine.refine_answer(task, initial)
 
         # ── Cyber fast-path (broad keyword match, before intent engine) ───
         if self.cyber and any(trigger in t_lower for trigger in self._CYBER_DIRECT_TRIGGERS):
@@ -592,14 +647,18 @@ class Brain:
         """
         log.info("Entering adaptive understanding pipeline")
 
+        # ── Reflexion: prepend past failure hints ─────────────────
+        reflexion_prefix = self.reflexion.build_context_prefix(text)
+
         # ── Stage 1: Context-aware LLM ────────────────────────────
         recent_output = self.context.get_recent_output(max_age_seconds=300)
         if recent_output and self.llm and self.llm.is_ready:
             domain = self.context.last_output_domain or "general"
             log.info(f"Stage 1: Context-aware LLM (domain={domain})")
             try:
+                augmented_text = reflexion_prefix + text if reflexion_prefix else text
                 response = self.llm.chat(
-                    prompt=text,
+                    prompt=augmented_text,
                     system=self._build_context_prompt(domain, recent_output),
                     task=self._domain_to_task(domain),
                 )
@@ -869,14 +928,25 @@ class Brain:
         log.info("Research topic: %r — save to: %r", topic_clean, save_file)
 
         # ── Do the actual research ────────────────────────────────
-        if self.researcher:
+        # Use orchestrator for complex/multi-angle research questions
+        if self.orchestrator.should_orchestrate(topic_clean):
             try:
-                report = self.researcher.answer(topic_clean)
+                report = self.orchestrator.run(topic_clean)
             except Exception as e:
-                log.warning("Researcher failed: %s", e)
-                report = self._understand(text, self.intent_eng.parse(text))
+                log.warning("Orchestrator failed, falling back to researcher: %s", e)
+                report = None
         else:
-            report = self._understand(text, self.intent_eng.parse(text))
+            report = None
+
+        if not report:
+            if self.researcher:
+                try:
+                    report = self.researcher.answer(topic_clean)
+                except Exception as e:
+                    log.warning("Researcher failed: %s", e)
+                    report = self._understand(text, self.intent_eng.parse(text))
+            else:
+                report = self._understand(text, self.intent_eng.parse(text))
 
         # ── Save to file if requested ────────────────────────────
         if save_file:
@@ -921,14 +991,21 @@ class Brain:
         return "Nothing to mark."
 
     def mark_bad(self, correction: str = ""):
-        """Call when a response was wrong. Optionally provide correct answer."""
+        """Call when a response was wrong — triggers Reflexion verbal RL."""
         episodes = self.memory.recent_episodes(1)
         if episodes:
             e = episodes[0]
             self.memory.log_training_pair(
                 e["user"], correction or e["nexus"], e["intent"], quality=0.0
             )
-            return "Got it — noted as a bad response."
+            # Reflexion: generate and store a natural-language reflection
+            reflection = self.reflexion.reflect(
+                user_input=e["user"],
+                bad_response=e["nexus"],
+                correction=correction,
+                intent_hint=e.get("intent", "")
+            )
+            return f"Got it — noted as bad. Reflection stored:\n  \"{reflection[:120]}...\""
         return "Nothing to mark."
 
     # ── Omi-inspired command handlers ────────────────────────────────────

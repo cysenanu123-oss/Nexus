@@ -42,6 +42,8 @@ import threading
 from dataclasses import dataclass, field
 from typing import Callable, Optional, Any
 
+from automation.checkpoint import CheckpointStore
+
 log = logging.getLogger("nexus.automation.executor")
 
 
@@ -151,6 +153,8 @@ class Executor:
         self._gui_agent   = None
         self._web_agent   = None
 
+        self._checkpoints = CheckpointStore()
+
         log.info("Executor ready.")
 
     # ── Public API ────────────────────────────────────────────
@@ -202,6 +206,19 @@ class Executor:
         step_results: list[StepResult] = []
         completed:    dict[int, bool]  = {}   # step_index → success
 
+        # ── Durable execution: checkpoint + resume ────────────
+        run_id = None
+        already_done: set[int] = set()
+        if not dry_run:
+            # Check for an unfinished run with the same instruction
+            existing_id = self._checkpoints.find_incomplete_run(plan.instruction)
+            if existing_id:
+                already_done = self._checkpoints.completed_steps(existing_id)
+                run_id = existing_id
+                log.info("Resuming run #%d — %d steps already done.", run_id, len(already_done))
+            else:
+                run_id = self._checkpoints.start_run(plan.instruction, plan.step_count)
+
         for step in plan.steps:
             # Check if dependencies are satisfied
             for dep in step.depends_on:
@@ -231,10 +248,28 @@ class Executor:
                         )
                     break
 
+            # Resume: skip steps that already completed in a prior run
+            if step.index in already_done:
+                log.info("Skipping already-done step %d (resume).", step.index)
+                sr = StepResult(
+                    step_index=step.index, step_desc=step.description,
+                    success=True, output="[resumed from checkpoint]"
+                )
+                step_results.append(sr)
+                completed[step.index] = True
+                continue
+
             # Execute the step
             sr = self._run_step(step, dry_run=dry_run)
             step_results.append(sr)
             completed[step.index] = sr.success
+
+            # Checkpoint this step result
+            if run_id and not dry_run:
+                self._checkpoints.save_step(
+                    run_id, step.index, step.description,
+                    sr.success, sr.output, sr.error, sr.elapsed_sec
+                )
 
             if on_progress:
                 try:
@@ -245,6 +280,8 @@ class Executor:
             # Abort on non-optional failure
             if not sr.success and not step.optional and not dry_run:
                 log.warning("Step %d failed — aborting plan.", step.index)
+                if run_id:
+                    self._checkpoints.finish_run(run_id, success=False)
                 return ExecutionResult(
                     instruction   = plan.instruction,
                     step_results  = step_results,
@@ -261,6 +298,9 @@ class Executor:
                        for i, s in enumerate(plan.steps)
                        if s.index == r.step_index)
         )
+
+        if run_id and not dry_run:
+            self._checkpoints.finish_run(run_id, success=overall_success)
 
         return ExecutionResult(
             instruction   = plan.instruction,

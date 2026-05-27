@@ -65,13 +65,49 @@ class Skill:
 # ─────────────────────────────────────────────────────────────
 
 class SkillRegistry:
-    """Persistent skill catalog backed by SQLite."""
+    """Persistent skill catalog backed by SQLite with Voyager-style vector retrieval."""
 
     def __init__(self, db_path: Path = _DB_PATH):
         self._db_path = db_path
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
         self._seed_builtins()
+        # Vector index for semantic skill search (Voyager pattern)
+        self._vector = None
+        self._vector_indexed = False
+        self._init_vector_index()
+
+    # ── Vector index (Voyager-style semantic retrieval) ───────
+
+    def _init_vector_index(self):
+        try:
+            from core.vector_memory import VectorMemory
+            self._vector = VectorMemory(persist_path="data/skill_vectors")
+            if not self._vector.ready:
+                self._vector = None
+                return
+            # Index all skills into the vector store on first run
+            if self._vector._memory_col.count() < self.count():
+                self._rebuild_vector_index()
+            self._vector_indexed = True
+        except Exception as e:
+            log.debug("Skill vector index unavailable: %s", e)
+            self._vector = None
+
+    def _rebuild_vector_index(self):
+        if not self._vector or not self._vector.ready:
+            return
+        skills = self.all()
+        for skill in skills:
+            text = f"{skill.name}: {skill.description}. Tags: {' '.join(skill.tags)}. Example: {skill.usage_example}"
+            self._vector.store(text, metadata={"skill_name": skill.name}, doc_id=f"skill_{skill.name}")
+        log.info("Skill vector index built: %d skills.", len(skills))
+
+    def _index_skill(self, skill: "Skill"):
+        if not self._vector or not self._vector.ready:
+            return
+        text = f"{skill.name}: {skill.description}. Tags: {' '.join(skill.tags)}. Example: {skill.usage_example}"
+        self._vector.store(text, metadata={"skill_name": skill.name}, doc_id=f"skill_{skill.name}")
 
     # ── DB plumbing ───────────────────────────────────────────
 
@@ -127,6 +163,7 @@ class SkillRegistry:
                 skill.created_at, skill.last_used, skill.use_count,
             ))
         log.info("Registered skill: %s [%s]", skill.name, skill.source)
+        self._index_skill(skill)
         return skill
 
     def get(self, name: str) -> Optional[Skill]:
@@ -149,7 +186,25 @@ class SkillRegistry:
     # ── Search ────────────────────────────────────────────────
 
     def search(self, query: str, limit: int = 8) -> list[Skill]:
-        """Rank skills by word-overlap with query (name + description + tags)."""
+        """Semantic skill retrieval (Voyager pattern) with keyword fallback."""
+        # Try vector search first
+        if self._vector and self._vector.ready:
+            try:
+                results = self._vector.search(query, n=limit)
+                if results:
+                    skills = []
+                    for r in results:
+                        name = r["metadata"].get("skill_name")
+                        if name:
+                            skill = self.get(name)
+                            if skill:
+                                skills.append(skill)
+                    if skills:
+                        return skills
+            except Exception as e:
+                log.debug("Vector skill search failed, falling back: %s", e)
+
+        # Fallback: keyword overlap search
         words = set(query.lower().split())
         with self._conn() as conn:
             rows = conn.execute("SELECT * FROM skills").fetchall()

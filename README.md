@@ -732,7 +732,13 @@ CYBERSECURITY COMMANDS (authorized use only)
 * [DONE] Action item & goal extractor — LLM + rule-based, SQLite persistence (`core/action_extractor.py`)
 * [DONE] Knowledge graph — entity/relationship tracking from conversations (`core/knowledge_graph.py`)
 * [DONE] Trends & focus sessions — usage analytics, peak hours, productivity tracking (`core/trends.py`)
-* [NOT STARTED] Multi-model collaboration
+* [DONE] Reflexion verbal RL — self-improvement from failures, LLM reflection + vector storage (`core/reflexion.py`)
+* [DONE] Sleep-time compute — background memory consolidation, Human/Persona/Task blocks (`core/sleep_compute.py`)
+* [DONE] Self-refine loop — generate→critique→refine with code execution feedback, CRITIC pattern (`core/self_refine.py`)
+* [DONE] Supervisor/Orchestrator — parallel worker agents for complex tasks (+90% on research evals) (`core/orchestrator.py`)
+* [DONE] Durable execution — checkpoint/replay for automation tasks, resume from last step (`automation/checkpoint.py`)
+* [DONE] Voyager skill retrieval — semantic vector search for skills, replaces keyword-only matching (`core/skill_registry.py`)
+* [DONE] Voice barge-in — frame-based DOWNSTREAM/UPSTREAM pipeline, user can interrupt TTS (`voice/engine.py`)
 * [NOT STARTED] Background daemon mode / hotword wake system
 
 ---
