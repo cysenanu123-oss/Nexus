@@ -578,7 +578,6 @@ class Brain:
             "research_topic", "search_web",
         ) and any(t in text.lower() for t in research_triggers):
             if any(t in text.lower() for t in ["read url", "fetch url", "summarize url", "learn from"]):
-                import re
                 url_match = re.search(r"https?://\S+", text)
                 if url_match:
                     response = self.researcher.learn_from_url(url_match.group(0))
@@ -645,7 +644,6 @@ class Brain:
     # ─────────────────────────────────────────────
 
     def _cmd_acquire_skill(self, text: str) -> str:
-        import re
         url_match = re.search(r"https?://\S+", text)
         if not url_match:
             return ("Please provide a URL to acquire a skill from.\n"
@@ -665,7 +663,6 @@ class Brain:
             return f"Skill acquisition failed: {exc}"
 
     def _cmd_create_skill(self, text: str) -> str:
-        import re
         # Strip the trigger phrase to get the description
         desc = re.sub(
             r"(create|make|build|write)\s+(a\s+)?skill\s+(to|for|that|which)?",
@@ -979,7 +976,6 @@ class Brain:
           3. Save to file if requested
           4. Return a summary response
         """
-        import re
         from pathlib import Path
         from datetime import datetime
 
