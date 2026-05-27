@@ -11,6 +11,31 @@ import sys
 import json
 import os
 from typing import Optional
+from core.platform_utils import IS_WINDOWS, IS_MAC
+
+
+# ── Windows install commands (choco / winget / manual download) ──────────────
+# Most pentest tools have native Windows builds. choco is tried first,
+# then winget, then a manual download hint.
+WINDOWS_INSTALL = {
+    "nmap":       {"choco": "nmap",       "winget": "Nmap.Nmap",
+                   "manual": "https://nmap.org/download.html"},
+    "masscan":    {"choco": "masscan",    "manual": "https://github.com/robertdavidgraham/masscan/releases"},
+    "nikto":      {"choco": "nikto",      "manual": "https://cirt.net/Nikto2"},
+    "nuclei":     {"choco": "nuclei",     "winget": "ProjectDiscovery.Nuclei",
+                   "manual": "https://github.com/projectdiscovery/nuclei/releases"},
+    "ffuf":       {"choco": "ffuf",       "manual": "https://github.com/ffuf/ffuf/releases"},
+    "gobuster":   {"choco": "gobuster",   "manual": "https://github.com/OJ/gobuster/releases"},
+    "hashcat":    {"choco": "hashcat",    "winget": "Hashcat.Hashcat",
+                   "manual": "https://hashcat.net/hashcat/"},
+    "john":       {"choco": "john",       "manual": "https://www.openwall.com/john/"},
+    "wireshark":  {"choco": "wireshark",  "winget": "WiresharkFoundation.Wireshark",
+                   "manual": "https://www.wireshark.org/download.html"},
+    "sqlmap":     {"choco": "sqlmap",     "manual": "https://sqlmap.org"},
+    "aircrack-ng":{"choco": "aircrack-ng","manual": "https://www.aircrack-ng.org/"},
+    "tcpdump":    {"manual": "https://www.winpcap.org/ (use Wireshark on Windows)"},
+    "netdiscover": {"manual": "Not natively available on Windows — use nmap -sn instead"},
+}
 
 
 # ─────────────────────────────────────────────
@@ -423,7 +448,7 @@ class ToolKit:
 
         result = {"tool": tool_name, "success": False, "attempts": []}
 
-        # ── Try pip install ───────────────────
+        # ── pip install (cross-platform, Python packages) ─────
         if info.get("install_pip"):
             pkg = info["install_pip"]
             if self.verbose:
@@ -434,7 +459,6 @@ class ToolKit:
                     capture_output=True, text=True, timeout=120
                 )
                 if proc.returncode == 0:
-                    # Invalidate cache
                     self._status_cache.pop(tool_name, None)
                     if self.verbose:
                         print(f"[NEXUS] ✓ {tool_name} installed via pip")
@@ -444,28 +468,74 @@ class ToolKit:
             except subprocess.TimeoutExpired:
                 result["attempts"].append({"method": "pip", "error": "timeout"})
 
-        # ── Try apt-get install ───────────────
-        if info.get("install_apt"):
-            pkg = info["install_apt"]
-            if self.verbose:
-                print(f"[NEXUS] Installing {tool_name} via apt ({pkg})...")
-            try:
-                # Try without sudo first (if already root)
-                for cmd in [
-                    ["apt-get", "install", "-y", pkg],
-                    ["sudo", "apt-get", "install", "-y", pkg],
-                ]:
+        if IS_WINDOWS:
+            # ── Windows: choco → winget ───────────────────────
+            win_info = WINDOWS_INSTALL.get(tool_name, {})
+            for mgr, pkg_key in [("choco", "choco"), ("winget", "winget")]:
+                pkg = win_info.get(pkg_key)
+                if pkg and shutil.which(mgr):
+                    if self.verbose:
+                        print(f"[NEXUS] Installing {tool_name} via {mgr} ({pkg})...")
+                    try:
+                        cmd = [mgr, "install", pkg, "-y"] if mgr == "choco" else \
+                              [mgr, "install", "--id", pkg, "-e", "--silent"]
+                        proc = subprocess.run(
+                            cmd, capture_output=True, text=True, timeout=300
+                        )
+                        if proc.returncode == 0:
+                            self._status_cache.pop(tool_name, None)
+                            if self.verbose:
+                                print(f"[NEXUS] ✓ {tool_name} installed via {mgr}")
+                            return {"success": True, "method": mgr,
+                                    "tool": tool_name, "pkg": pkg}
+                        result["attempts"].append(
+                            {"method": mgr, "error": proc.stderr[:200]}
+                        )
+                    except subprocess.TimeoutExpired:
+                        result["attempts"].append({"method": mgr, "error": "timeout"})
+        elif IS_MAC:
+            # ── macOS: brew ───────────────────────────────────
+            if info.get("install_apt") and shutil.which("brew"):
+                pkg = info["install_apt"]
+                if self.verbose:
+                    print(f"[NEXUS] Installing {tool_name} via brew ({pkg})...")
+                try:
                     proc = subprocess.run(
-                        cmd, capture_output=True, text=True, timeout=180
+                        ["brew", "install", pkg],
+                        capture_output=True, text=True, timeout=300
                     )
                     if proc.returncode == 0:
                         self._status_cache.pop(tool_name, None)
-                        if self.verbose:
-                            print(f"[NEXUS] ✓ {tool_name} installed via apt")
-                        return {"success": True, "method": "apt", "tool": tool_name, "pkg": pkg}
-                    result["attempts"].append({"method": " ".join(cmd[:2]), "error": proc.stderr[:200]})
-            except subprocess.TimeoutExpired:
-                result["attempts"].append({"method": "apt", "error": "timeout"})
+                        return {"success": True, "method": "brew",
+                                "tool": tool_name, "pkg": pkg}
+                    result["attempts"].append({"method": "brew", "error": proc.stderr[:200]})
+                except subprocess.TimeoutExpired:
+                    result["attempts"].append({"method": "brew", "error": "timeout"})
+        else:
+            # ── Linux: apt-get ────────────────────────────────
+            if info.get("install_apt"):
+                pkg = info["install_apt"]
+                if self.verbose:
+                    print(f"[NEXUS] Installing {tool_name} via apt ({pkg})...")
+                try:
+                    for cmd in [
+                        ["apt-get", "install", "-y", pkg],
+                        ["sudo", "apt-get", "install", "-y", pkg],
+                    ]:
+                        proc = subprocess.run(
+                            cmd, capture_output=True, text=True, timeout=180
+                        )
+                        if proc.returncode == 0:
+                            self._status_cache.pop(tool_name, None)
+                            if self.verbose:
+                                print(f"[NEXUS] ✓ {tool_name} installed via apt")
+                            return {"success": True, "method": "apt",
+                                    "tool": tool_name, "pkg": pkg}
+                        result["attempts"].append(
+                            {"method": " ".join(cmd[:2]), "error": proc.stderr[:200]}
+                        )
+                except subprocess.TimeoutExpired:
+                    result["attempts"].append({"method": "apt", "error": "timeout"})
 
         result["error"] = "All install methods failed"
         result["manual_hint"] = self._manual_install_hint(tool_name)
@@ -521,6 +591,18 @@ class ToolKit:
         hints = []
         if info.get("install_pip"):
             hints.append(f"pip install {info['install_pip']}")
-        if info.get("install_apt"):
-            hints.append(f"sudo apt-get install {info['install_apt']}")
+        if IS_WINDOWS:
+            win = WINDOWS_INSTALL.get(tool_name, {})
+            if win.get("choco"):
+                hints.append(f"choco install {win['choco']}")
+            if win.get("winget"):
+                hints.append(f"winget install --id {win['winget']}")
+            if win.get("manual"):
+                hints.append(f"Download: {win['manual']}")
+        elif IS_MAC:
+            if info.get("install_apt"):
+                hints.append(f"brew install {info['install_apt']}")
+        else:
+            if info.get("install_apt"):
+                hints.append(f"sudo apt-get install {info['install_apt']}")
         return " | ".join(hints) if hints else f"Search: how to install {tool_name}"
