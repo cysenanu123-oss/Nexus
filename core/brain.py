@@ -16,6 +16,7 @@ Internally it uses:
 """
 
 import logging
+import re
 import time
 
 from core.intent_engine  import IntentEngine
@@ -43,6 +44,7 @@ from core.reflexion            import ReflexionEngine
 from core.sleep_compute        import SleepCompute
 from core.self_refine          import SelfRefine
 from core.orchestrator         import Orchestrator
+from core.persona              import PersonaManager
 
 log = logging.getLogger("nexus.brain")
 
@@ -184,6 +186,10 @@ class Brain:
             session_mgr=self.session_mgr
         )
         self.sleep_compute.start()
+
+        # ── Persona system (1,839 expert roles from prompts.chat) ───────────
+        self.persona = PersonaManager(llm=self.llm)
+        log.info("PersonaManager ready — %d personas.", self.persona.count())
 
         log.info("Brain ready.")
 
@@ -422,6 +428,44 @@ class Brain:
             initial = self._understand(task, self.intent_eng.parse(task))
             return self.self_refine.refine_answer(task, initial)
 
+        # ── Persona commands ─────────────────────────────────────────────
+        if any(t_lower.startswith(p) for p in ("act as ", "be a ", "be an ", "switch to ", "persona ")):
+            query = re.sub(r"^(act as|be an?|switch to|persona)\s+", "", t_lower).strip()
+            match = self.persona.activate(query)
+            if match:
+                return f"Persona activated: [{match['act']}]\n\"{match['prompt'][:120]}...\""
+            return f"No persona found matching '{query}'. Try: personas cyber / personas code"
+
+        if t_lower.strip() in ("clear persona", "reset persona", "back to nexus", "disable persona", "remove persona"):
+            self.persona.clear()
+            return "Persona cleared — back to NEXUS default."
+
+        if t_lower.strip() in ("personas", "list personas", "show personas", "what personas", "persona list"):
+            cats = self.persona.list_categories()
+            lines = [f"Personas — {self.persona.count()} total:"]
+            for cat, names in cats.items():
+                if names:
+                    lines.append(f"  {cat.upper()} ({len(names)}): {', '.join(names[:4])}{'...' if len(names) > 4 else ''}")
+            lines.append(f"\nActive: [{self.persona.active_name}]")
+            lines.append("Usage: act as cyber security specialist | act as python debugger | clear persona")
+            return "\n".join(lines)
+
+        if t_lower.startswith("personas ") or t_lower.startswith("search personas "):
+            query = t_lower.split(None, 1)[1]
+            results = self.persona.search(query, limit=8)
+            if not results:
+                return f"No personas matching '{query}'."
+            lines = [f"Personas matching '{query}':"]
+            for p in results:
+                lines.append(f"  • {p['act']}")
+            return "\n".join(lines)
+
+        if t_lower.strip() == "active persona":
+            if self.persona.active:
+                p = self.persona.active
+                return f"Active persona: [{p['act']}]\n{p['prompt'][:300]}"
+            return "No active persona — running as NEXUS default."
+
         # ── Cyber fast-path (broad keyword match, before intent engine) ───
         if self.cyber and any(trigger in t_lower for trigger in self._CYBER_DIRECT_TRIGGERS):
             response = self.cyber.run(text)
@@ -650,6 +694,9 @@ class Brain:
         # ── Reflexion: prepend past failure hints ─────────────────
         reflexion_prefix = self.reflexion.build_context_prefix(text)
 
+        # ── Persona: build system prefix ──────────────────────────
+        persona_prefix = self.persona.system_prefix()
+
         # ── Stage 1: Context-aware LLM ────────────────────────────
         recent_output = self.context.get_recent_output(max_age_seconds=300)
         if recent_output and self.llm and self.llm.is_ready:
@@ -657,9 +704,12 @@ class Brain:
             log.info(f"Stage 1: Context-aware LLM (domain={domain})")
             try:
                 augmented_text = reflexion_prefix + text if reflexion_prefix else text
+                base_system = self._build_context_prompt(domain, recent_output)
+                # Persona overrides base system when a persona is active
+                system_prompt = (persona_prefix + "\n\n" + base_system) if self.persona.active else base_system
                 response = self.llm.chat(
                     prompt=augmented_text,
-                    system=self._build_context_prompt(domain, recent_output),
+                    system=system_prompt,
                     task=self._domain_to_task(domain),
                 )
                 if response and not self._is_uncertain(response):
@@ -674,9 +724,11 @@ class Brain:
             task   = self._domain_to_task(domain)
             log.info(f"Stage 2: Domain-aware LLM (domain={domain}, task={task})")
             try:
+                base_system2 = self._build_domain_prompt(domain)
+                system_prompt2 = (persona_prefix + "\n\n" + base_system2) if self.persona.active else base_system2
                 response = self.llm.chat(
                     prompt=text,
-                    system=self._build_domain_prompt(domain),
+                    system=system_prompt2,
                     task=task,
                 )
                 if response and not self._is_uncertain(response):
