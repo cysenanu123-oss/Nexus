@@ -8,12 +8,18 @@ Uses: scapy → arp-scan → arping → fallback (ping sweep)
 import subprocess
 import socket
 import struct
-import fcntl
+import sys
 import ipaddress
 import re
 import os
 from typing import Optional
 from .toolkit import ToolKit
+from core.platform_utils import (
+    IS_WINDOWS, ping_cmd, arp_table, routing_table, get_default_gateway_iface,
+)
+
+if not IS_WINDOWS:
+    import fcntl  # POSIX only
 
 
 class NetworkIntel:
@@ -77,16 +83,19 @@ class NetworkIntel:
 
     def get_default_interface(self) -> Optional[dict]:
         """Return the default network interface (the one with internet access)."""
+        iface_name = get_default_gateway_iface()
+        if iface_name:
+            for iface in self.get_interfaces():
+                if iface["name"] == iface_name:
+                    return iface
+        # Socket-based fallback — always works
         try:
-            proc = subprocess.run(
-                ["ip", "route", "show", "default"],
-                capture_output=True, text=True
-            )
-            match = re.search(r"dev (\S+)", proc.stdout)
-            if match:
-                iface_name = match.group(1)
-                for iface in self.get_interfaces():
-                    if iface["name"] == iface_name:
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+                s.connect(("8.8.8.8", 80))
+                local_ip = s.getsockname()[0]
+            for iface in self.get_interfaces():
+                for addr in iface.get("ipv4", []):
+                    if addr.get("address") == local_ip:
                         return iface
         except Exception:
             pass
@@ -207,14 +216,11 @@ class NetworkIntel:
         hosts = []
         try:
             network = ipaddress.IPv4Network(subnet, strict=False)
-            # Limit to /24 for speed
             host_list = list(network.hosts())[:254]
             for ip in host_list:
                 ip_str = str(ip)
-                proc = subprocess.run(
-                    ["ping", "-c", "1", "-W", "1", ip_str],
-                    capture_output=True, timeout=3
-                )
+                cmd = ping_cmd(ip_str, count=1, timeout_sec=1)
+                proc = subprocess.run(cmd, capture_output=True, timeout=3)
                 if proc.returncode == 0:
                     hosts.append({
                         "ip": ip_str,
@@ -231,32 +237,12 @@ class NetworkIntel:
     # ─────────────────────────────────────────
 
     def get_routing_table(self) -> list[dict]:
-        """Return the system routing table."""
-        routes = []
-        try:
-            proc = subprocess.run(["ip", "route"], capture_output=True, text=True)
-            for line in proc.stdout.splitlines():
-                routes.append({"route": line.strip()})
-        except Exception:
-            pass
-        return routes
+        """Return the system routing table (cross-platform)."""
+        return routing_table()
 
     def get_arp_table(self) -> list[dict]:
-        """Return current ARP cache."""
-        entries = []
-        try:
-            proc = subprocess.run(["arp", "-n"], capture_output=True, text=True)
-            for line in proc.stdout.splitlines()[1:]:  # skip header
-                parts = line.split()
-                if len(parts) >= 3:
-                    entries.append({
-                        "ip": parts[0],
-                        "mac": parts[2],
-                        "interface": parts[-1] if len(parts) > 3 else "",
-                    })
-        except Exception:
-            pass
-        return entries
+        """Return current ARP cache (cross-platform)."""
+        return arp_table()
 
     def get_active_connections(self) -> list[dict]:
         """Return active network connections."""
