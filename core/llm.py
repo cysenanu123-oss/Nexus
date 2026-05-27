@@ -100,6 +100,7 @@ class LLM:
         model: Optional[str] = None,
         task: str = "chat",
         stream: bool = False,
+        options: Optional[dict] = None,
     ) -> str:
         """
         Send a message and get a response.
@@ -155,10 +156,10 @@ class LLM:
             if stream:
                 return self._stream_response(selected_model, messages)
 
-            response = self._client.chat(
-                model=selected_model,
-                messages=messages,
-            )
+            call_kwargs: dict = {"model": selected_model, "messages": messages}
+            if options:
+                call_kwargs["options"] = options
+            response = self._client.chat(**call_kwargs)
             text    = response.message.content.strip()
             elapsed = time.time() - t0
             log.info(f"LLM response in {elapsed:.2f}s ({len(text)} chars)")
@@ -257,7 +258,7 @@ class LLM:
         )
         return self.chat(f"Explain: {concept}", system=system)
 
-    def ask(self, question: str, context: str = "") -> str:
+    def ask(self, question: str, context: str = "", max_tokens: int = 500) -> str:
         """
         General question answering with optional context.
         Used when screen content or documents are involved.
@@ -266,7 +267,7 @@ class LLM:
             prompt = f"Context:\n{context}\n\nQuestion: {question}"
         else:
             prompt = question
-        return self.chat(prompt)
+        return self.chat(prompt, options={"num_predict": max_tokens})
 
     def classify_intent(self, text: str) -> dict:
         """
