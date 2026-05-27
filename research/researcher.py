@@ -37,6 +37,54 @@ from typing import Optional
 log = logging.getLogger("nexus.research.researcher")
 
 
+def _format_output(topic: str, content: str, sources: list, source: str = "web") -> str:
+    """Render a research result in NEXUS's styled format."""
+    from datetime import datetime
+    width = 62
+    bar   = "═" * width
+    thin  = "─" * width
+    ts    = datetime.now().strftime("%Y-%m-%d  %H:%M")
+    src_label = "memory" if source == "memory" else "web research"
+
+    lines = [
+        f"\n  {bar}",
+        f"  NEXUS RESEARCH  ·  {ts}",
+        f"  Topic : {topic}",
+        f"  {thin}",
+        "",
+    ]
+
+    # Indent each paragraph of the content
+    for para in content.strip().split("\n"):
+        stripped = para.strip()
+        if not stripped:
+            lines.append("")
+        elif stripped.startswith(("•", "-", "*", "–")):
+            lines.append(f"    {stripped}")
+        else:
+            # Wrap long lines at ~70 chars
+            words, cur = [], 0
+            row: list[str] = []
+            for word in stripped.split():
+                if cur + len(word) + 1 > 68 and row:
+                    lines.append("  " + " ".join(row))
+                    row, cur = [], 0
+                row.append(word)
+                cur += len(word) + 1
+            if row:
+                lines.append("  " + " ".join(row))
+
+    # Sources footer
+    unique_sources = list(dict.fromkeys(s for s in sources if s and "nexus://" not in s))
+    if unique_sources:
+        lines += ["", f"  {thin}", f"  Sources ({src_label}):"]
+        for i, url in enumerate(unique_sources[:3], 1):
+            lines.append(f"    [{i}] {url[:72]}")
+
+    lines.append(f"  {bar}\n")
+    return "\n".join(lines)
+
+
 class Researcher:
     """
     The NEXUS Research Agent.
@@ -202,14 +250,19 @@ class Researcher:
         """
         # Check memory for existing knowledge
         if not force_refresh and self.use_memory:
-            cached = self.memory.recall(question, max_results=2, min_relevance=0.55)
+            cached = self.memory.recall(question, max_results=3, min_relevance=0.55)
             if cached:
-                best = cached[0].entry
                 log.info("Answering from memory (relevance=%.2f)", cached[0].relevance)
-                return (
-                    f"From my research notes:\n\n{best.text[:1200]}"
-                    f"\n\nSource: {best.url}"
-                )
+                # Re-synthesize from memory rather than dumping raw text
+                from research.summarizer import Summary
+                mem_summaries = [
+                    Summary(url=r.entry.url, title=r.entry.topic,
+                            topic=question, text=r.entry.text, model="memory-recall")
+                    for r in cached
+                ]
+                synthesis = self.summarizer.synthesize(mem_summaries, topic=question)
+                if synthesis:
+                    return _format_output(question, synthesis, [r.entry.url for r in cached], source="memory")
 
         # Full research
         report = self.research(question, force_refresh=force_refresh)
@@ -217,14 +270,12 @@ class Researcher:
         if not report.success:
             return f"I couldn't research that: {report.error}"
 
-        if report.synthesis:
-            return report.synthesis
+        content = report.synthesis or (report.summaries[0].text if report.summaries else "")
+        if not content:
+            return "Research completed but produced no content."
 
-        # Fallback to first summary
-        if report.summaries:
-            return report.summaries[0].text
-
-        return "Research completed but produced no content."
+        sources = [s.url for s in report.summaries]
+        return _format_output(question, content, sources, source="web")
 
     def recall(self, query: str, max_results: int = 5) -> str:
         """

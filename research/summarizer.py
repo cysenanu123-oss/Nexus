@@ -189,27 +189,30 @@ class Summarizer:
             return ""
 
         combined = "\n\n".join(
-            f"Source: {s.title}\n{s.text}" for s in summaries
+            f"Source {i+1} [{s.title}]:\n{s.text}"
+            for i, s in enumerate(summaries)
         )
         combined = combined[:MAX_CONTENT_FOR_LLM * 2]
 
         if self._llm and self._llm.is_ready:
             prompt = (
-                f"You are a research assistant. "
-                f"I have gathered information from {len(summaries)} sources "
-                f"on the topic: '{topic}'. "
-                f"Write a concise, structured synthesis of the key findings. "
-                f"Use bullet points. Be accurate and comprehensive. "
-                f"Highlight any conflicting information across sources.\n\n"
-                f"{combined}"
+                f"You are NEXUS, a sharp and knowledgeable AI assistant. "
+                f"Using the research sources below, write a well-structured answer about: \"{topic}\"\n\n"
+                f"Rules:\n"
+                f"- Write in your own words. Do NOT copy article titles or headlines.\n"
+                f"- Start with a 2-3 sentence overview of the topic.\n"
+                f"- Then list 4-6 key findings or developments as bullet points (• ).\n"
+                f"- End with a 1-sentence takeaway.\n"
+                f"- Be concise and technically accurate. Avoid padding.\n\n"
+                f"Research sources:\n{combined}"
             )
             try:
                 return self._llm.chat(prompt, task="research")
             except Exception as e:
                 log.error("LLM synthesis failed: %s", e)
 
-        # Fallback: just return all summaries joined
-        return "\n\n".join(s.text for s in summaries)
+        # Fallback: first summary only (avoid dumping all raw text)
+        return summaries[0].text if summaries else ""
 
     # ── LLM-based summarization ───────────────────────────────
 
