@@ -25,3 +25,9 @@ onnxruntime>=1.16           # Required backend for openWakeWord on Linux
 requests>=2.28          # HTTP client for web fetching
 beautifulsoup4>=4.12    # HTML parsing and text extraction
 chromadb>=0.4.0         # Local vector database for semantic memory
+
+# ── Omi-inspired Intelligence Layer ──────────────────
+# chromadb already listed above — used by VectorMemory
+# sentence-transformers is the default embedding function in chromadb
+# No extra install needed unless you want faster GPU embeddings:
+# pip install sentence-transformers torch

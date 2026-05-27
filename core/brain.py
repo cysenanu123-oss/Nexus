@@ -35,6 +35,10 @@ from core.entry_model         import get_entry_model, Cat
 from core.autonomous_planner  import AutonomousPlanner
 from core.skill_registry      import get_registry
 from core.task_planner        import get_task_planner
+from core.conversation_session import ConversationSessionManager
+from core.action_extractor     import ActionExtractor
+from core.knowledge_graph      import KnowledgeGraph
+from core.trends               import TrendsTracker
 
 log = logging.getLogger("nexus.brain")
 
@@ -159,6 +163,12 @@ class Brain:
         # Automation engine — lazy-loaded on first use
         self._automation = None
 
+        # ── Omi-inspired intelligence layer ──────────────────────────────
+        self.session_mgr  = ConversationSessionManager(llm=self.llm)
+        self.action_ext   = ActionExtractor(llm=self.llm)
+        self.kg           = KnowledgeGraph(llm=self.llm)
+        self.trends       = TrendsTracker()
+
         log.info("Brain ready.")
 
     # ─────────────────────────────────────────────
@@ -172,6 +182,9 @@ class Brain:
         text = text.strip()
         if not text:
             return "I didn't hear anything."
+
+        # ── Session + trends tracking ─────────────────────────────────────
+        self.session_mgr.add_turn("user", text)
 
         # ── Stage 0: Normalize + Entry Model ─────────────────────────────
         ni = self._normalizer.normalize(text)
@@ -256,6 +269,11 @@ class Brain:
         self.memory.log_episode(text, response, intent.intent)
         self.memory.log_training_pair(text, response, intent.intent)
 
+        # Feed into session + intelligence layer
+        self.session_mgr.add_turn("nexus", response)
+        self.trends.log_command(text, intent=intent.intent)
+        self.kg.extract_from_text(text, source="conversation")
+
         return response
 
     # ─────────────────────────────────────────────
@@ -303,6 +321,51 @@ class Brain:
         if any(t in t_lower for t in ("do this task", "plan this task", "figure out how to",
                                        "work out how to", "how would you", "figure this out")):
             return self._cmd_task_plan(text)
+
+        # ── Session / conversation commands ──────────────────────────────
+        if t_lower.strip() in ("end session", "end conversation", "save session", "summarize session"):
+            return self._cmd_end_session()
+
+        if t_lower.strip() in ("sessions", "show sessions", "conversation history", "my conversations"):
+            return self._cmd_show_sessions()
+
+        if t_lower.startswith("session ") and t_lower.split()[1].isdigit():
+            return self._cmd_session_detail(int(t_lower.split()[1]))
+
+        # ── Action items commands ─────────────────────────────────────────
+        if t_lower.strip() in ("actions", "action items", "pending actions", "my tasks", "todo list"):
+            return self._cmd_pending_actions()
+
+        if t_lower.startswith("done ") and t_lower.split()[1].isdigit():
+            return self._cmd_complete_action(int(t_lower.split()[1]))
+
+        # ── Knowledge graph commands ──────────────────────────────────────
+        if t_lower.strip() in ("graph", "knowledge graph", "show graph", "what do you know"):
+            return self.kg.visualize()
+
+        if t_lower.startswith("who is ") or t_lower.startswith("what is "):
+            entity = text[7:].strip()
+            info = self.kg.query_entity(entity)
+            if info:
+                lines = [f"{entity} ({info['type']}, mentioned {info['mentions']}x)"]
+                for r in info.get("outgoing", [])[:5]:
+                    lines.append(f"  → {r['relation']} → {r['to']}")
+                for r in info.get("incoming", [])[:3]:
+                    lines.append(f"  ← {r['from']} {r['relation']}")
+                return "\n".join(lines)
+
+        # ── Trends commands ───────────────────────────────────────────────
+        if t_lower.strip() in ("trends", "my trends", "usage trends", "weekly report"):
+            return self.trends.weekly_report()
+
+        if t_lower.strip() in ("focus sessions", "focus", "my focus"):
+            sessions = self.trends.get_focus_sessions(limit=5)
+            if not sessions:
+                return "No focus sessions detected yet."
+            lines = ["── Recent Focus Sessions ──"]
+            for s in sessions:
+                lines.append(f"  {s['started_str']} — {s['duration_min']}min, {s['command_count']} commands ({s['top_intent']})")
+            return "\n".join(lines)
 
         # ── Cyber fast-path (broad keyword match, before intent engine) ───
         if self.cyber and any(trigger in t_lower for trigger in self._CYBER_DIRECT_TRIGGERS):
@@ -867,3 +930,65 @@ class Brain:
             )
             return "Got it — noted as a bad response."
         return "Nothing to mark."
+
+    # ── Omi-inspired command handlers ────────────────────────────────────
+
+    def _cmd_end_session(self) -> str:
+        result = self.session_mgr.end_session()
+        if not result:
+            return "No active session to save."
+        lines = [f"Session saved: \"{result['title']}\""]
+        if result["summary"]:
+            lines.append(f"Summary: {result['summary']}")
+        if result["action_items"]:
+            lines.append(f"Action items ({len(result['action_items'])}):")
+            for a in result["action_items"][:5]:
+                lines.append(f"  • {a['text']}")
+        if result["topics"]:
+            lines.append(f"Topics: {', '.join(result['topics'])}")
+        return "\n".join(lines)
+
+    def _cmd_show_sessions(self) -> str:
+        sessions = self.session_mgr.get_sessions(limit=10)
+        if not sessions:
+            return "No saved sessions yet."
+        from datetime import datetime
+        lines = ["── Recent Conversations ──────────────────"]
+        for s in sessions:
+            dt = datetime.fromtimestamp(s["started_at"]).strftime("%b %d %H:%M")
+            title = s["title"] or "Untitled"
+            turns = s["turn_count"]
+            lines.append(f"  #{s['id']} [{dt}] {title} ({turns} turns)")
+        return "\n".join(lines)
+
+    def _cmd_session_detail(self, session_id: int) -> str:
+        detail = self.session_mgr.get_session_detail(session_id)
+        if not detail:
+            return f"Session #{session_id} not found."
+        lines = [f"── Session #{session_id}: {detail['title']} ──"]
+        if detail["summary"]:
+            lines.append(f"Summary: {detail['summary']}")
+        actions = detail.get("action_items", [])
+        if actions:
+            lines.append("Action items:")
+            for a in actions:
+                status = "✓" if a["done"] else "•"
+                lines.append(f"  {status} [{a['category']}] {a['text']}")
+        topics = detail.get("topics", [])
+        if topics:
+            lines.append(f"Topics: {', '.join(topics)}")
+        return "\n".join(lines)
+
+    def _cmd_pending_actions(self) -> str:
+        pending = self.action_ext.get_pending()
+        if not pending:
+            return "No pending action items."
+        lines = ["── Pending Action Items ─────────────────"]
+        for item in pending[:15]:
+            lines.append(f"  #{item['id']} [{item['category']}] {item['text']}")
+        return "\n".join(lines)
+
+    def _cmd_complete_action(self, action_id: int) -> str:
+        self.action_ext.mark_done(action_id)
+        self.session_mgr.complete_action(action_id)
+        return f"Action #{action_id} marked as done."

@@ -35,6 +35,9 @@ from voice.speech_to_text import Transcriber
 
 logger = logging.getLogger("nexus.voice.engine")
 
+# Auto-end conversation session after this many seconds of voice silence
+_VOICE_SESSION_TIMEOUT = 180
+
 
 # ─────────────────────────────────────────────────────────────
 #  VOICE ENGINE
@@ -61,14 +64,17 @@ class VoiceEngine:
         command_callback: Callable[[str], None],
         wake_phrase: str = "hey nexus",
         whisper_model: str = "tiny",
+        session_manager=None,
     ):
         self.command_callback = command_callback
         self.wake_phrase      = wake_phrase
         self.whisper_model    = whisper_model
+        self._session_mgr     = session_manager  # ConversationSessionManager, injected from Brain
 
         self._running         = False
         self._continuous_mode = False
         self._thread: Optional[threading.Thread] = None
+        self._last_voice_activity = time.time()
 
         # Core systems
         self.listener    = MicrophoneListener()
@@ -195,12 +201,19 @@ class VoiceEngine:
 
             text = transcript.text.strip()
             print(f"\n[USER] {text}\n")
+            self._last_voice_activity = time.time()
+
+            # Auto-end stale session if silence gap was long
+            if self._session_mgr:
+                self._session_mgr.auto_end_if_stale()
 
             # Handle exit words
             lower_text = text.lower().strip(".?!,;")
             if lower_text in ["stop", "exit", "quit", "cancel",
                               "nevermind", "stop listening"]:
                 print("[NEXUS] Exiting voice mode.\n")
+                if self._session_mgr:
+                    self._session_mgr.end_session()
                 self._continuous_mode = False
                 if lower_text not in ["exit", "quit"]:
                     continue

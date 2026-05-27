@@ -1,8 +1,9 @@
 """
 core/memory_manager.py
-NEXUS Memory System — two layers:
-  - Short-term : in-memory dict, lives for the session
-  - Long-term  : SQLite database, persists across sessions
+NEXUS Memory System — three layers:
+  - Short-term  : in-memory dict, lives for the session
+  - Long-term   : SQLite database, persists across sessions
+  - Vector      : ChromaDB semantic search (if available)
 
 Training data is also written here for future fine-tuning.
 """
@@ -13,6 +14,8 @@ import time
 import logging
 import os
 from typing import Optional, Any
+
+from core.vector_memory import VectorMemory
 
 log = logging.getLogger("nexus.memory")
 
@@ -67,7 +70,8 @@ class MemoryManager:
     def __init__(self):
         _init_db()
         self._short: dict[str, Any] = {}
-        log.info("MemoryManager ready.")
+        self._vector = VectorMemory()
+        log.info("MemoryManager ready (vector=%s).", self._vector.ready)
 
     # ── Short-term (session) ─────────────────────────────────────────────
 
@@ -85,7 +89,7 @@ class MemoryManager:
     # ── Long-term (SQLite) ───────────────────────────────────────────────
 
     def remember(self, key: str, value: Any, category: str = "general"):
-        """Persist a key-value fact to SQLite."""
+        """Persist a key-value fact to SQLite and vector store."""
         serialized = json.dumps(value) if not isinstance(value, str) else value
         with _connect() as conn:
             conn.execute("""
@@ -96,6 +100,7 @@ class MemoryManager:
                     category=excluded.category,
                     timestamp=excluded.timestamp
             """, (key.lower(), serialized, category, time.time()))
+        self._vector.store(f"{key}: {serialized}", metadata={"category": category, "key": key}, doc_id=key.lower())
         log.debug(f"Long-term stored: {key!r}")
 
     def recall(self, key: str) -> Optional[str]:
@@ -113,7 +118,21 @@ class MemoryManager:
         return [{"key": r["key"], "value": r["value"]} for r in rows]
 
     def search_memory(self, query: str) -> list[dict]:
-        """Fuzzy keyword search across long-term memory."""
+        """Semantic + keyword search across long-term memory."""
+        # Try vector search first
+        if self._vector.ready:
+            vector_results = self._vector.search(query, n=5)
+            if vector_results:
+                return [
+                    {
+                        "key": r["metadata"].get("key", ""),
+                        "value": r["text"],
+                        "category": r["metadata"].get("category", "general"),
+                        "score": 1 - r["distance"],
+                    }
+                    for r in vector_results
+                ]
+        # Fallback to SQLite keyword search
         with _connect() as conn:
             rows = conn.execute(
                 "SELECT key, value, category FROM long_term WHERE key LIKE ? OR value LIKE ?",
@@ -158,6 +177,7 @@ class MemoryManager:
                 INSERT INTO episodes (user_text, nexus_text, intent, timestamp)
                 VALUES (?, ?, ?, ?)
             """, (user_text, nexus_text, intent, time.time()))
+        self._vector.store_episode(user_text, nexus_text, intent)
 
     def recent_episodes(self, n: int = 10) -> list[dict]:
         with _connect() as conn:

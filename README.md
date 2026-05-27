@@ -727,7 +727,11 @@ CYBERSECURITY COMMANDS (authorized use only)
 * [DONE] Unified autonomous planner — AI reasoning + physical task execution merged
 * [DONE] Skill system — registry (24 skills), acquirer (GitHub/URL), creator (LLM)
 * [DONE] Logical task planner — 5-stage planning with web research and learning
-* [IN PROGRESS] Long-term memory architecture refinement
+* [DONE] Long-term memory architecture — SQLite + ChromaDB vector semantic search (`core/vector_memory.py`)
+* [DONE] Conversation session manager — auto-transcripts, LLM summaries, action item extraction (`core/conversation_session.py`)
+* [DONE] Action item & goal extractor — LLM + rule-based, SQLite persistence (`core/action_extractor.py`)
+* [DONE] Knowledge graph — entity/relationship tracking from conversations (`core/knowledge_graph.py`)
+* [DONE] Trends & focus sessions — usage analytics, peak hours, productivity tracking (`core/trends.py`)
 * [NOT STARTED] Multi-model collaboration
 * [NOT STARTED] Background daemon mode / hotword wake system
 
