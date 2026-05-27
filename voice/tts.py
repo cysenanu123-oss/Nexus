@@ -14,50 +14,80 @@ Usage:
 """
 
 import logging
+import platform
 import subprocess
+import sys
 import threading
 import queue
 import shutil
+import tempfile
+import os
 
 log = logging.getLogger("nexus.tts")
 
+_IS_WINDOWS = sys.platform == "win32"
+
 
 # ─────────────────────────────────────────────
-# Backend: pyttsx3 (offline, instant setup)
+# Backend: pyttsx3 (offline — SAPI on Windows,
+#   espeak on Linux, NSS/eSpeak on macOS)
 # ─────────────────────────────────────────────
 
 def _try_pyttsx3():
     try:
         import pyttsx3  # type: ignore
         engine = pyttsx3.init()
-        engine.setProperty("rate", 165)    # words per minute
+        engine.setProperty("rate", 165)
         engine.setProperty("volume", 0.9)
-        # Try to pick a male voice (more "assistant" feel)
         voices = engine.getProperty("voices")
         for v in voices:
-            if "male" in v.name.lower() or "david" in v.name.lower():
+            name = v.name.lower() if v.name else ""
+            if "male" in name or "david" in name or "zira" in name:
                 engine.setProperty("voice", v.id)
                 break
-        log.info("TTS backend: pyttsx3")
+        log.info("TTS backend: pyttsx3 (SAPI on Windows)")
         return engine
     except Exception as e:
-        log.debug(f"pyttsx3 unavailable: {e}")
+        log.debug("pyttsx3 unavailable: %s", e)
         return None
 
 
 # ─────────────────────────────────────────────
-# Backend: espeak (system binary, always works)
+# Backend: Windows SAPI via winsound (fallback)
 # ─────────────────────────────────────────────
 
-from scipy.io import wavfile
-import sounddevice as sd
+def _winsound_say(text: str):
+    """Synthesize via PowerShell SAPI — no extra packages needed on Windows."""
+    safe = text.replace("'", " ").replace('"', " ")
+    ps = (
+        f"Add-Type -AssemblyName System.Speech; "
+        f"$s = New-Object System.Speech.Synthesis.SpeechSynthesizer; "
+        f"$s.Speak('{safe}')"
+    )
+    subprocess.run(
+        ["powershell", "-WindowStyle", "Hidden", "-Command", ps],
+        capture_output=True,
+        timeout=30,
+    )
+
+
+# ─────────────────────────────────────────────
+# Backend: espeak (Linux/macOS)
+# ─────────────────────────────────────────────
+
+try:
+    from scipy.io import wavfile
+    import sounddevice as sd
+    _SCIPY_AVAILABLE = True
+except ImportError:
+    _SCIPY_AVAILABLE = False
 
 def _espeak_say(text: str):
     if not shutil.which("espeak") and not shutil.which("espeak-ng"):
         raise RuntimeError("espeak not found")
     
     binary = "espeak-ng" if shutil.which("espeak-ng") else "espeak"
-    wav_path = "/tmp/nexus_tts.wav"
+    wav_path = os.path.join(tempfile.gettempdir(), "nexus_tts.wav")
 
     # Generate the TTS into a WAV file instead of trying to play it via aplay
     subprocess.run(
@@ -66,30 +96,38 @@ def _espeak_say(text: str):
         capture_output=True,
     )
 
-    # Play audio — try sounddevice first, fall back to aplay (covers WSL2)
+    # Play audio — try sounddevice first, then platform fallbacks
     try:
-        fs, data = wavfile.read(wav_path)
+        if _SCIPY_AVAILABLE:
+            fs, data = wavfile.read(wav_path)
+            target_fs = 44100
+            if fs != target_fs:
+                from scipy.signal import resample
+                num_samples = int(len(data) * float(target_fs) / fs)
+                data = resample(data, num_samples)
+                fs = target_fs
+            try:
+                sd.play(data, fs)
+                sd.wait()
+                return
+            except Exception:
+                pass
 
-        target_fs = 44100
-        if fs != target_fs:
-            from scipy.signal import resample
-            num_samples = int(len(data) * float(target_fs) / fs)
-            data = resample(data, num_samples)
-            fs = target_fs
-
-        try:
-            sd.play(data, fs)
-            sd.wait()
-        except Exception:
-            # sounddevice unavailable (WSL2, headless) — fall back to aplay
-            if shutil.which("aplay"):
-                subprocess.run(["aplay", "-q", wav_path],
-                               capture_output=True, check=False)
-            elif shutil.which("paplay"):
-                subprocess.run(["paplay", wav_path],
-                               capture_output=True, check=False)
-            else:
-                log.debug("No audio output available — TTS skipped (WSL2/headless).")
+        # sounddevice unavailable — platform-specific fallback
+        if _IS_WINDOWS:
+            import winsound
+            winsound.PlaySound(wav_path, winsound.SND_FILENAME)
+        elif shutil.which("aplay"):
+            subprocess.run(["aplay", "-q", wav_path],
+                           capture_output=True, check=False)
+        elif shutil.which("paplay"):
+            subprocess.run(["paplay", wav_path],
+                           capture_output=True, check=False)
+        elif shutil.which("afplay"):
+            subprocess.run(["afplay", wav_path],
+                           capture_output=True, check=False)
+        else:
+            log.debug("No audio output available — TTS skipped.")
     except Exception as e:
         log.warning("TTS playback skipped: %s", e)
 
@@ -117,20 +155,38 @@ class Speaker:
         self._lock      = threading.Lock()
         self._running   = True
 
-        # Prefer espeak over pyttsx3 on Linux due to ALSA/aplay bugs
-        if backend in ("auto", "espeak"):
-            if shutil.which("espeak-ng") or shutil.which("espeak"):
-                self._backend = "espeak"
-                log.info("TTS backend: espeak")
-
-        if self._backend is None and backend in ("auto", "pyttsx3"):
+        if backend == "auto":
+            if _IS_WINDOWS:
+                # On Windows: pyttsx3 (SAPI) is best, then PowerShell SAPI
+                self._engine = _try_pyttsx3()
+                if self._engine:
+                    self._backend = "pyttsx3"
+                else:
+                    self._backend = "winsound"
+                    log.info("TTS backend: PowerShell SAPI (winsound fallback)")
+            else:
+                # On Linux/macOS: prefer espeak for reliability
+                if shutil.which("espeak-ng") or shutil.which("espeak"):
+                    self._backend = "espeak"
+                    log.info("TTS backend: espeak")
+                else:
+                    self._engine = _try_pyttsx3()
+                    if self._engine:
+                        self._backend = "pyttsx3"
+        elif backend == "pyttsx3":
             self._engine = _try_pyttsx3()
             if self._engine:
                 self._backend = "pyttsx3"
+        elif backend == "espeak":
+            if shutil.which("espeak-ng") or shutil.which("espeak"):
+                self._backend = "espeak"
+        elif backend == "winsound":
+            self._backend = "winsound"
 
         if self._backend is None:
-            log.warning("No TTS backend found — speech disabled. "
-                        "Run: pip install pyttsx3  or  sudo apt install espeak-ng")
+            hint = ("pip install pyttsx3" if _IS_WINDOWS
+                    else "pip install pyttsx3  or  sudo apt install espeak-ng")
+            log.warning("No TTS backend found — speech disabled. Run: %s", hint)
 
         # Start background speech worker
         self._worker = threading.Thread(target=self._run, daemon=True)
@@ -170,6 +226,9 @@ class Speaker:
                 with self._lock:
                     self._engine.say(clean)
                     self._engine.runAndWait()
+
+            elif self._backend == "winsound":
+                _winsound_say(clean)
 
             elif self._backend == "espeak":
                 _espeak_say(clean)
