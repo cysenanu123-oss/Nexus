@@ -33,6 +33,8 @@ import logging
 from pathlib import Path
 from typing import Optional
 
+from core.platform_utils import IS_WINDOWS, IS_MAC
+
 log = logging.getLogger("nexus.automation.shell")
 
 
@@ -40,7 +42,7 @@ log = logging.getLogger("nexus.automation.shell")
 #  APP ALIASES  (user phrase → actual binary)
 # ─────────────────────────────────────────────────────────────
 
-APP_ALIASES: dict[str, str] = {
+_APP_ALIASES_LINUX: dict[str, str] = {
     # Browsers
     "browser":           "firefox",
     "chrome":            "google-chrome",
@@ -48,7 +50,7 @@ APP_ALIASES: dict[str, str] = {
     "firefox":           "firefox",
     "brave":             "brave-browser",
     "edge":              "microsoft-edge",
-    # Editors / text editors
+    # Editors
     "vs code":           "code",
     "vscode":            "code",
     "vscodium":          "vscodium",
@@ -57,7 +59,7 @@ APP_ALIASES: dict[str, str] = {
     "nvim":              "nvim",
     "nano":              "nano",
     "gedit":             "gedit",
-    "mousepad":          "mousepad",     # XFCE text editor
+    "mousepad":          "mousepad",
     "text editor":       "mousepad",
     "leafpad":           "leafpad",
     # Terminals
@@ -66,7 +68,7 @@ APP_ALIASES: dict[str, str] = {
     "konsole":           "konsole",
     "gnome terminal":    "gnome-terminal",
     "xterm":             "xterm",
-    # Security tools (Kali)
+    # Security tools
     "burp":              "burpsuite",
     "burp suite":        "burpsuite",
     "wireshark":         "wireshark",
@@ -79,8 +81,8 @@ APP_ALIASES: dict[str, str] = {
     "file manager":      "thunar",
     "thunar":            "thunar",
     "nautilus":          "nautilus",
-    # System / utilities
-    "calculator":        "galculator",   # Kali/XFCE default
+    # System
+    "calculator":        "galculator",
     "galculator":        "galculator",
     "settings":          "xfce4-settings-manager",
     "task manager":      "xfce4-taskmanager",
@@ -89,11 +91,106 @@ APP_ALIASES: dict[str, str] = {
     "vlc":               "vlc",
     "spotify":           "spotify",
     "discord":           "discord",
-    # Dev tools
+    # Dev
     "python":            "python3",
     "jupyter":           "jupyter-notebook",
     "postman":           "postman",
 }
+
+_APP_ALIASES_WINDOWS: dict[str, str] = {
+    # Browsers
+    "browser":           "chrome.exe",
+    "chrome":            "chrome.exe",
+    "firefox":           "firefox.exe",
+    "brave":             "brave.exe",
+    "edge":              "msedge.exe",
+    "chromium":          "chromium.exe",
+    # Editors
+    "vs code":           "code.exe",
+    "vscode":            "code.exe",
+    "code":              "code.exe",
+    "notepad":           "notepad.exe",
+    "notepad++":         "notepad++.exe",
+    "text editor":       "notepad.exe",
+    "wordpad":           "wordpad.exe",
+    # Terminals
+    "terminal":          "wt.exe",
+    "windows terminal":  "wt.exe",
+    "cmd":               "cmd.exe",
+    "powershell":        "powershell.exe",
+    # Messaging / Social
+    "whatsapp":          "WhatsApp.exe",
+    "discord":           "Discord.exe",
+    "telegram":          "Telegram.exe",
+    "slack":             "slack.exe",
+    "teams":             "Teams.exe",
+    "zoom":              "Zoom.exe",
+    # Media
+    "spotify":           "Spotify.exe",
+    "vlc":               "vlc.exe",
+    # Security tools
+    "wireshark":         "Wireshark.exe",
+    "burp":              "burpsuite.exe",
+    "burp suite":        "burpsuite.exe",
+    "nmap":              "nmap.exe",
+    # System utilities
+    "calculator":        "calc.exe",
+    "task manager":      "taskmgr.exe",
+    "system monitor":    "taskmgr.exe",
+    "file manager":      "explorer.exe",
+    "explorer":          "explorer.exe",
+    "files":             "explorer.exe",
+    "control panel":     "control.exe",
+    "settings":          "ms-settings:",
+    # Dev
+    "python":            "python.exe",
+    "jupyter":           "jupyter-notebook.exe",
+    "postman":           "Postman.exe",
+    "git bash":          "git-bash.exe",
+}
+
+_APP_ALIASES_MAC: dict[str, str] = {
+    "browser":           "Safari",
+    "chrome":            "Google Chrome",
+    "firefox":           "Firefox",
+    "brave":             "Brave Browser",
+    "edge":              "Microsoft Edge",
+    "vs code":           "Visual Studio Code",
+    "vscode":            "Visual Studio Code",
+    "code":              "Visual Studio Code",
+    "terminal":          "Terminal",
+    "iterm":             "iTerm",
+    "whatsapp":          "WhatsApp",
+    "discord":           "Discord",
+    "slack":             "Slack",
+    "spotify":           "Spotify",
+    "vlc":               "VLC",
+    "calculator":        "Calculator",
+    "file manager":      "Finder",
+    "finder":            "Finder",
+    "files":             "Finder",
+    "settings":          "System Preferences",
+    "python":            "Python Launcher",
+    "postman":           "Postman",
+}
+
+if IS_WINDOWS:
+    APP_ALIASES = _APP_ALIASES_WINDOWS
+elif IS_MAC:
+    APP_ALIASES = _APP_ALIASES_MAC
+else:
+    APP_ALIASES = _APP_ALIASES_LINUX
+
+# Common Windows install paths to search for executables
+_WIN_SEARCH_PATHS: list[Path] = [
+    Path(os.environ.get("LOCALAPPDATA", "")) / "Programs",
+    Path(os.environ.get("LOCALAPPDATA", "")) / "WhatsApp",
+    Path(os.environ.get("APPDATA", "")) / "Spotify" / "Spotify.exe",
+    Path(os.environ.get("APPDATA", "")) / "Discord" / "Update.exe",
+    Path("C:/Program Files"),
+    Path("C:/Program Files (x86)"),
+    Path(os.environ.get("LOCALAPPDATA", "")) / "Discord" / "app-" ,
+]
 
 
 # ─────────────────────────────────────────────────────────────
@@ -159,41 +256,127 @@ class ShellAgent:
 
     def _launch_app(self, step) -> tuple[bool, str]:
         target = step.target.strip().lower()
-        binary = APP_ALIASES.get(target, target.replace(" ", "-"))
+        app_name = APP_ALIASES.get(target, target)
 
-        if not shutil.which(binary):
-            # Try exact target as-is
-            if not shutil.which(step.target):
-                return (False,
-                        f"App '{binary}' not found on PATH. "
-                        f"Install with: sudo apt install {binary}")
+        if IS_WINDOWS:
+            return self._launch_app_windows(step.target, app_name)
+        elif IS_MAC:
+            return self._launch_app_mac(step.target, app_name)
+        else:
+            return self._launch_app_linux(step.target, app_name)
 
+    def _launch_app_linux(self, label: str, binary: str) -> tuple[bool, str]:
+        resolved = shutil.which(binary) or shutil.which(label)
+        if not resolved:
+            return False, f"App '{binary}' not found. Install with: apt install {binary}"
+        try:
+            subprocess.Popen([resolved], stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL, start_new_session=True)
+            log.info("Launched: %s", resolved)
+            return True, f"Launched {label}"
+        except Exception as e:
+            return False, f"Failed to launch {label}: {e}"
+
+    def _launch_app_windows(self, label: str, exe: str) -> tuple[bool, str]:
+        # 1) Try PATH first (works for cmd.exe, notepad.exe, etc.)
+        if shutil.which(exe):
+            try:
+                os.startfile(exe)   # type: ignore[attr-defined]
+                return True, f"Launched {label}"
+            except Exception:
+                pass
+
+        # 2) ms-settings: and other URI schemes
+        if ":" in exe and not exe.endswith(".exe"):
+            try:
+                os.startfile(exe)   # type: ignore[attr-defined]
+                return True, f"Opened {label}"
+            except Exception as e:
+                return False, f"Failed to open {label}: {e}"
+
+        # 3) Search common install directories
+        search_dirs = [
+            Path(os.environ.get("LOCALAPPDATA", "C:/Users/Default/AppData/Local")),
+            Path(os.environ.get("LOCALAPPDATA", "")) / "Programs",
+            Path(os.environ.get("APPDATA", "")),
+            Path("C:/Program Files"),
+            Path("C:/Program Files (x86)"),
+        ]
+        for base in search_dirs:
+            if not base.exists():
+                continue
+            for found in base.rglob(exe):
+                if found.is_file():
+                    try:
+                        os.startfile(str(found))   # type: ignore[attr-defined]
+                        log.info("Launched via search: %s", found)
+                        return True, f"Launched {label} ({found.name})"
+                    except Exception:
+                        pass
+
+        # 4) Let Windows shell resolve it (Start-Process)
         try:
             subprocess.Popen(
-                [binary],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                start_new_session=True,
+                ["powershell", "-WindowStyle", "Hidden", "-Command",
+                 f'Start-Process "{exe}"'],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             )
-            log.info("Launched app: %s", binary)
-            return True, f"Launched {step.target} ({binary})"
+            return True, f"Launched {label} via shell"
         except Exception as e:
-            log.error("Launch failed: %s", e)
-            return False, f"Failed to launch {step.target}: {e}"
+            pass
 
-    def _kill_app(self, step) -> tuple[bool, str]:
-        target = step.target.strip().lower()
-        binary = APP_ALIASES.get(target, target)
+        return False, (
+            f"App '{label}' not found. Make sure it is installed. "
+            f"Search '{label}' in the Start Menu to confirm."
+        )
+
+    def _launch_app_mac(self, label: str, app_name: str) -> tuple[bool, str]:
+        # Try 'open -a AppName' which works for any .app in /Applications
         try:
             result = subprocess.run(
-                ["pkill", "-f", binary],
+                ["open", "-a", app_name],
                 capture_output=True, timeout=5
             )
             if result.returncode == 0:
-                return True, f"Closed {step.target}"
-            return False, f"No running process found for {step.target!r}"
-        except Exception as e:
-            return False, str(e)
+                return True, f"Launched {label}"
+        except Exception:
+            pass
+        # Fallback: binary on PATH
+        binary = shutil.which(app_name.lower().replace(" ", "-"))
+        if binary:
+            subprocess.Popen([binary], stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL, start_new_session=True)
+            return True, f"Launched {label}"
+        return False, f"App '{label}' not found. Install with: brew install --cask {app_name.lower()}"
+
+    def _kill_app(self, step) -> tuple[bool, str]:
+        target = step.target.strip().lower()
+        app_name = APP_ALIASES.get(target, target)
+
+        if IS_WINDOWS:
+            exe = app_name if app_name.endswith(".exe") else app_name + ".exe"
+            try:
+                result = subprocess.run(
+                    ["taskkill", "/F", "/IM", exe],
+                    capture_output=True, timeout=5
+                )
+                if result.returncode == 0:
+                    return True, f"Closed {step.target}"
+                return False, f"No running process found for {step.target!r}"
+            except Exception as e:
+                return False, str(e)
+        else:
+            binary = app_name if not IS_MAC else app_name.lower().replace(" ", "")
+            try:
+                result = subprocess.run(
+                    ["pkill", "-f", binary],
+                    capture_output=True, timeout=5
+                )
+                if result.returncode == 0:
+                    return True, f"Closed {step.target}"
+                return False, f"No running process found for {step.target!r}"
+            except Exception as e:
+                return False, str(e)
 
     # ── Command execution ─────────────────────────────────────
 
