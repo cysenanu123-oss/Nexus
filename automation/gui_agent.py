@@ -25,11 +25,83 @@ from __future__ import annotations
 
 import subprocess
 import shutil
+import sys
 import time
 import logging
 from typing import Optional
 
 log = logging.getLogger("nexus.automation.gui")
+
+_IS_WINDOWS = sys.platform == "win32"
+
+
+def _win32_focus(title_fragment: str) -> bool:
+    """Focus a window by partial title on Windows using pygetwindow or win32gui."""
+    # 1. pygetwindow
+    try:
+        import pygetwindow as gw  # type: ignore
+        wins = gw.getWindowsWithTitle(title_fragment)
+        if wins:
+            wins[0].activate()
+            return True
+    except ImportError:
+        pass
+    # 2. win32gui
+    try:
+        import win32gui  # type: ignore
+        import win32con  # type: ignore
+        def _cb(hwnd, results):
+            if title_fragment.lower() in win32gui.GetWindowText(hwnd).lower():
+                results.append(hwnd)
+        found = []
+        win32gui.EnumWindows(_cb, found)
+        if found:
+            win32gui.ShowWindow(found[0], win32con.SW_RESTORE)
+            win32gui.SetForegroundWindow(found[0])
+            return True
+    except ImportError:
+        pass
+    return False
+
+
+def _win32_maximize() -> bool:
+    """Maximize the foreground window on Windows."""
+    try:
+        import win32gui, win32con  # type: ignore
+        hwnd = win32gui.GetForegroundWindow()
+        win32gui.ShowWindow(hwnd, win32con.SW_MAXIMIZE)
+        return True
+    except ImportError:
+        pass
+    try:
+        import pygetwindow as gw  # type: ignore
+        w = gw.getActiveWindow()
+        if w:
+            w.maximize()
+            return True
+    except ImportError:
+        pass
+    return False
+
+
+def _win32_minimize() -> bool:
+    """Minimize the foreground window on Windows."""
+    try:
+        import win32gui, win32con  # type: ignore
+        hwnd = win32gui.GetForegroundWindow()
+        win32gui.ShowWindow(hwnd, win32con.SW_MINIMIZE)
+        return True
+    except ImportError:
+        pass
+    try:
+        import pygetwindow as gw  # type: ignore
+        w = gw.getActiveWindow()
+        if w:
+            w.minimize()
+            return True
+    except ImportError:
+        pass
+    return False
 
 
 # ─────────────────────────────────────────────────────────────
@@ -309,6 +381,11 @@ class GUIAgent:
         if not target:
             return False, "No window target specified."
 
+        if _IS_WINDOWS:
+            ok = _win32_focus(target)
+            return (True, f"Focused window: {target!r}") if ok else \
+                   (False, "Window not found (install pygetwindow or pywin32)")
+
         if self._has_xdotool:
             try:
                 result = subprocess.run(
@@ -361,6 +438,9 @@ class GUIAgent:
         return True, f"Waited ~{timeout*0.3:.0f}s for window {target!r}"
 
     def _maximize_window(self, step) -> tuple[bool, str]:
+        if _IS_WINDOWS:
+            return (True, "Maximized active window") if _win32_maximize() else \
+                   (False, "Install pygetwindow or pywin32 for window control")
         if self._has_xdotool:
             try:
                 subprocess.run(
@@ -382,6 +462,9 @@ class GUIAgent:
         return False, "xdotool or wmctrl required for maximize"
 
     def _minimize_window(self, step) -> tuple[bool, str]:
+        if _IS_WINDOWS:
+            return (True, "Minimized active window") if _win32_minimize() else \
+                   (False, "Install pygetwindow or pywin32 for window control")
         if self._has_xdotool:
             try:
                 subprocess.run(

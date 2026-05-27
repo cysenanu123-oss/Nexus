@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import re
 import logging
+import shutil
 from dataclasses import dataclass, field
 from typing import Optional, Any
 
@@ -570,57 +571,74 @@ def _plan_volume(match, instruction: str) -> list[dict]:
 
 
 def _plan_brightness(match, instruction: str) -> list[dict]:
+    from core.platform_utils import brightness_cmd
     action = match.group("action").lower().strip()
     level  = match.groupdict().get("level", "").strip()
-    if level and level.isdigit():
-        cmd = f"xrandr --output $(xrandr | grep ' connected' | head -1 | cut -d' ' -f1) --brightness {int(level)/100:.1f}"
-    elif action == "up":
-        cmd = "xbacklight -inc 10"
-    else:
-        cmd = "xbacklight -dec 10"
+    cmd = brightness_cmd(action, level if level and level.isdigit() else None)
     return [{"type": "shell", "action": "run_command",
              "target": cmd, "description": f"Brightness {action}"}]
 
 
 def _plan_notify(match, instruction: str) -> list[dict]:
+    from core.platform_utils import IS_WINDOWS
     msg = match.group("msg").strip()
+    if IS_WINDOWS:
+        # Use PowerShell toast — no extra dependency
+        ps = (f"Add-Type -AssemblyName System.Windows.Forms; "
+              f"[System.Windows.Forms.MessageBox]::Show('{msg}', 'NEXUS')")
+        cmd = f"powershell -WindowStyle Hidden -Command \"{ps}\""
+    else:
+        cmd = f'notify-send "NEXUS" "{msg}"'
     return [
         {"type": "shell", "action": "run_command",
-         "target": f'notify-send "NEXUS" "{msg}"',
-         "description": f"Send notification: {msg}"},
+         "target": cmd, "description": f"Send notification: {msg}"},
     ]
 
 
 def _plan_clipboard_copy(match, instruction: str) -> list[dict]:
+    from core.platform_utils import IS_WINDOWS, IS_MAC
     text = match.group("text").strip()
+    if IS_WINDOWS:
+        cmd = f"echo {text} | clip"
+    elif IS_MAC:
+        cmd = f"echo -n '{text}' | pbcopy"
+    else:
+        if shutil.which("xclip"):
+            cmd = f"echo -n '{text}' | xclip -selection clipboard"
+        elif shutil.which("wl-copy"):
+            cmd = f"echo -n '{text}' | wl-copy"
+        else:
+            cmd = f"echo -n '{text}' | xsel --clipboard --input"
     return [
         {"type": "shell", "action": "run_command",
-         "target": f"echo -n '{text}' | xclip -selection clipboard",
-         "description": f"Copy to clipboard: {text!r}"},
+         "target": cmd, "description": f"Copy to clipboard: {text!r}"},
     ]
 
 
 def _plan_system_info(match, instruction: str) -> list[dict]:
+    from core.platform_utils import system_info_cmd
     return [
         {"type": "shell", "action": "run_command",
-         "target": "uname -a && free -h && df -h",
+         "target": system_info_cmd(),
          "description": "Get system information"},
     ]
 
 
 def _plan_kill_process(match, instruction: str) -> list[dict]:
+    from core.platform_utils import kill_process_cmd
     proc = match.group("proc").strip()
     return [
         {"type": "shell", "action": "run_command",
-         "target": f"pkill -f '{proc}'",
+         "target": kill_process_cmd(proc),
          "description": f"Kill process: {proc}"},
     ]
 
 
 def _plan_network_info(match, instruction: str) -> list[dict]:
+    from core.platform_utils import network_info_cmd
     return [
         {"type": "shell", "action": "run_command",
-         "target": "ip addr show && ip route",
+         "target": network_info_cmd(),
          "description": "Show network information"},
     ]
 

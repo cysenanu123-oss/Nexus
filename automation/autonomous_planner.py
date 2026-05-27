@@ -138,13 +138,10 @@ def _ics_event(title: str, dt_str: str, duration_min: int = 60) -> str:
 
 
 def _system_notify(title: str, body: str, urgency: str = "normal") -> bool:
-    """Send a desktop notification. Returns True on success."""
+    """Send a desktop notification — cross-platform."""
     try:
-        subprocess.run(
-            ["notify-send", "-u", urgency, title, body],
-            timeout=5, capture_output=True,
-        )
-        return True
+        from core.platform_utils import notify
+        return notify(title, body, urgency=urgency)
     except Exception:
         return False
 
@@ -590,7 +587,14 @@ class AutonomousPlanner:
             remind_date = p.get("reminder_date", date.today().isoformat())
             title       = p.get("title", "NEXUS Reminder")
             body        = p.get("body", "")
-            cmd         = f'notify-send -u critical "{title}" "{body}"'
+            from core.platform_utils import IS_WINDOWS
+            if IS_WINDOWS:
+                import urllib.parse
+                ps_body = body.replace("'", " ")
+                cmd = (f"powershell -Command \"Add-Type -AssemblyName System.Windows.Forms; "
+                       f"[System.Windows.Forms.MessageBox]::Show('{ps_body}', '{title}')\"")
+            else:
+                cmd = f'notify-send -u critical "{title}" "{body}"'
             ok          = _schedule_at_command(cmd, f"{remind_time} {remind_date}")
             return (f"Reminder scheduled at {remind_time} on {remind_date}"
                     if ok else f"at command unavailable — reminder not scheduled")
@@ -786,11 +790,11 @@ class AutonomousPlanner:
                         self.timeout_sec = 15.0
                 ok, out = gui.run(_NS(p.get("url", step.description)))
                 return out if ok else f"Navigate failed: {out}"
-            # Fallback: xdg-open
+            # Fallback: cross-platform URL open
             url = p.get("url", "")
             if url:
-                subprocess.Popen(["xdg-open", url], stdout=subprocess.DEVNULL,
-                                 stderr=subprocess.DEVNULL)
+                from core.platform_utils import open_url
+                open_url(url)
                 return f"Opened {url} in browser"
             return "No URL specified"
 
