@@ -5,29 +5,67 @@
 
 # ── Core / System ────────────────────────────────────────────
 numpy>=1.24
+psutil>=5.9                 # Cross-platform process & network info
+rapidfuzz>=3.0              # Fuzzy string matching (entry model, spell checker)
+pyspellchecker>=0.7         # Spell checking / normalizer
+
+# ── LLM / Ollama ─────────────────────────────────────────────
+ollama>=0.1.0               # Ollama Python client (pip install ollama)
+requests>=2.28              # HTTP client (also used by researcher)
 
 # ── Voice / Audio Pipeline ───────────────────────────────────
 sounddevice>=0.4.6          # Microphone capture via PortAudio
-scipy>=1.10                 # Resampling (resample_poly) & Butterworth filter
+scipy>=1.10                 # Resampling & audio processing
+pyttsx3>=2.90               # TTS — SAPI on Windows, espeak on Linux
 
 # ── Speech-to-Text ───────────────────────────────────────────
-faster-whisper>=1.0.0       # Local Whisper inference via CTranslate2 (offline)
+faster-whisper>=1.0.0       # Local Whisper STT (offline)
+onnxruntime>=1.16           # Backend for openWakeWord & insightface
 
 # ── Wake Word Detection ──────────────────────────────────────
-openwakeword>=0.6.0         # Offline wake-word engine (recommended)
-onnxruntime>=1.16           # Required backend for openWakeWord on Linux
+openwakeword>=0.6.0         # Offline wake-word engine
 
-# ── System-level dependencies (not pip-installable) ──────────
-# sudo apt install libportaudio2 portaudio19-dev -y
-# sudo apt install ffmpeg -y
+# ── Research Module ───────────────────────────────────────────
+beautifulsoup4>=4.12        # HTML parsing
+feedparser>=6.0             # RSS/Atom feed parsing (cyber news)
+chromadb>=0.4.0             # Vector database for semantic memory
 
-# ── Research Module ───────────────────────────────────
-requests>=2.28          # HTTP client for web fetching
-beautifulsoup4>=4.12    # HTML parsing and text extraction
-chromadb>=0.4.0         # Local vector database for semantic memory
+# ── GUI Automation ────────────────────────────────────────────
+pyautogui>=0.9.54           # Cross-platform mouse/keyboard automation
+Pillow>=9.0                 # Required by pyautogui for screenshots
 
-# ── Omi-inspired Intelligence Layer ──────────────────
-# chromadb already listed above — used by VectorMemory
-# sentence-transformers is the default embedding function in chromadb
-# No extra install needed unless you want faster GPU embeddings:
-# pip install sentence-transformers torch
+# ── Screen / Vision ───────────────────────────────────────────
+mss>=7.0                    # Fast cross-platform screenshots
+pytesseract>=0.3.10         # OCR (requires Tesseract binary)
+
+# ── Network / Cyber ───────────────────────────────────────────
+python-nmap>=0.7.1          # Python wrapper for nmap
+scapy>=2.5                  # Packet crafting and ARP scanning
+dnspython>=2.3              # DNS lookups for recon module
+
+# ── Automation ────────────────────────────────────────────────
+pyperclip>=1.8              # Cross-platform clipboard copy/paste
+
+# ── Windows-specific (only needed on Windows) ─────────────────
+# pip install pygetwindow    # Window focus/maximize/minimize
+# pip install win10toast     # Windows toast notifications
+# pip install pywin32        # win32gui/win32api for advanced window control
+
+# ── Optional: Speaker ID ──────────────────────────────────────
+# pip install speechbrain torchaudio torch   # ~2 GB, GPU optional
+
+# ── Optional: Face Detection ──────────────────────────────────
+# pip install insightface opencv-python      # buffalo_l model (~500 MB)
+
+# ── Optional: NSFW Filter ─────────────────────────────────────
+# pip install opennsfw2
+
+# ── System-level (not pip-installable) ────────────────────────
+# Linux:
+#   sudo apt install libportaudio2 portaudio19-dev ffmpeg espeak-ng tesseract-ocr -y
+# Windows:
+#   winget install Tesseract-OCR.Tesseract    (for OCR)
+#   choco install ffmpeg                      (for audio)
+#   PortAudio is bundled with sounddevice wheel on Windows — no extra install
+# macOS:
+#   brew install portaudio ffmpeg espeak tesseract
