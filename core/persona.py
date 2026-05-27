@@ -31,7 +31,7 @@ from typing import Optional
 
 log = logging.getLogger("nexus.persona")
 
-PERSONAS_PATH = Path("data/personas.json")
+PERSONAS_PATH = Path(__file__).parent.parent / "data" / "personas.json"
 
 _NEXUS_DEFAULT = (
     "You are NEXUS, a personal AI assistant built by Cyril. "
