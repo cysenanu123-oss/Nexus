@@ -66,6 +66,8 @@ HEADERS = {
 
 DDGO_URL    = "https://html.duckduckgo.com/html/"
 GOOGLE_URL  = "https://www.google.com/search"
+BING_URL    = "https://www.bing.com/search"
+WIKI_API    = "https://en.wikipedia.org/w/api.php"
 
 
 # ─────────────────────────────────────────────────────────────
@@ -171,10 +173,20 @@ class WebSearcher:
         # Try DuckDuckGo first
         response = self._search_ddg(query, max_results)
 
-        # Fall back to Google if DDG returned nothing
+        # Fall back to Google
         if not response.success:
             log.warning("DDG returned no results — trying Google.")
             response = self._search_google(query, max_results)
+
+        # Fall back to Bing
+        if not response.success:
+            log.warning("Google returned no results — trying Bing.")
+            response = self._search_bing(query, max_results)
+
+        # Last resort: Wikipedia
+        if not response.success:
+            log.warning("Bing returned no results — trying Wikipedia.")
+            response = self._search_wikipedia(query, max_results)
 
         response.elapsed = time.time() - t0
         log.info(
@@ -289,6 +301,86 @@ class WebSearcher:
             return SearchResponse(query=query, error="No results from Google.")
 
         return SearchResponse(query=query, results=results, source="google")
+
+
+    # ── Bing fallback backend ─────────────────────────────────
+
+    def _search_bing(self, query: str, max_results: int) -> SearchResponse:
+        """Scrape Bing search results."""
+        try:
+            params = {"q": query, "count": max_results + 2}
+            headers = dict(self._session.headers)
+            headers["User-Agent"] = (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/124.0.0.0 Safari/537.36"
+            )
+            resp = self._session.get(
+                BING_URL, params=params, headers=headers, timeout=self.timeout
+            )
+            resp.raise_for_status()
+        except Exception as e:
+            log.warning("Bing request failed: %s", e)
+            return SearchResponse(query=query, error=str(e))
+
+        soup    = BeautifulSoup(resp.text, "html.parser")
+        results = []
+        rank    = 1
+
+        for li in soup.select("li.b_algo")[:max_results]:
+            a_tag       = li.select_one("h2 a")
+            snippet_tag = li.select_one(".b_caption p, p.b_lineclamp2, .b_algoSlug")
+            if not a_tag:
+                continue
+            url     = a_tag.get("href", "")
+            title   = a_tag.get_text(strip=True)
+            snippet = snippet_tag.get_text(strip=True) if snippet_tag else ""
+            if not url.startswith("http"):
+                continue
+            results.append(SearchResult(title=title, url=url, snippet=snippet, rank=rank))
+            rank += 1
+
+        if not results:
+            return SearchResponse(query=query, error="No results from Bing.")
+        return SearchResponse(query=query, results=results, source="bing")
+
+    # ── Wikipedia fallback ────────────────────────────────────
+
+    def _search_wikipedia(self, query: str, max_results: int) -> SearchResponse:
+        """Query Wikipedia's opensearch API — always works, no bot-detection."""
+        try:
+            # Opensearch for title matches
+            resp = self._session.get(
+                WIKI_API,
+                params={
+                    "action": "opensearch",
+                    "search": query,
+                    "limit": max_results,
+                    "namespace": 0,
+                    "format": "json",
+                },
+                timeout=self.timeout,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            titles   = data[1] if len(data) > 1 else []
+            snippets = data[2] if len(data) > 2 else []
+            urls     = data[3] if len(data) > 3 else []
+
+            results = []
+            for i, (title, snippet, url) in enumerate(zip(titles, snippets, urls)):
+                results.append(SearchResult(
+                    title=title, url=url,
+                    snippet=snippet[:300], rank=i + 1,
+                ))
+
+            if not results:
+                return SearchResponse(query=query, error="No results from Wikipedia.")
+            log.info("Wikipedia returned %d results for %r", len(results), query)
+            return SearchResponse(query=query, results=results, source="wikipedia")
+        except Exception as e:
+            log.warning("Wikipedia search failed: %s", e)
+            return SearchResponse(query=query, error=str(e))
 
 
 # ─────────────────────────────────────────────────────────────
