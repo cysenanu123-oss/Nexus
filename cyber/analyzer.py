@@ -13,10 +13,12 @@ import os
 import re
 import subprocess
 import glob
+import sys
 from datetime import datetime, timedelta
 from collections import defaultdict
 from typing import Optional
 from .toolkit import ToolKit
+from core.platform_utils import IS_WINDOWS
 
 
 # ─────────────────────────────────────────────
@@ -72,8 +74,8 @@ THREAT_PATTERNS = {
     },
 }
 
-# Common log file locations
-LOG_PATHS = {
+# Log file locations — Linux
+_LINUX_LOG_PATHS = {
     "auth":    ["/var/log/auth.log", "/var/log/secure"],
     "syslog":  ["/var/log/syslog", "/var/log/messages"],
     "kern":    ["/var/log/kern.log"],
@@ -83,6 +85,16 @@ LOG_PATHS = {
     "fail2ban":["/var/log/fail2ban.log"],
     "dpkg":    ["/var/log/dpkg.log"],
 }
+
+# Log file locations — Windows (text-exported via wevtutil, or app logs)
+_WINDOWS_LOG_PATHS = {
+    "security":    [r"C:\Windows\System32\winevt\Logs\Security.evtx"],
+    "system":      [r"C:\Windows\System32\winevt\Logs\System.evtx"],
+    "application": [r"C:\Windows\System32\winevt\Logs\Application.evtx"],
+    "iis":         [r"C:\inetpub\logs\LogFiles"],
+}
+
+LOG_PATHS = _WINDOWS_LOG_PATHS if IS_WINDOWS else _LINUX_LOG_PATHS
 
 
 class LogAnalyzer:
@@ -113,9 +125,11 @@ class LogAnalyzer:
 
         available_logs = self._find_available_logs(log_types)
         if not available_logs:
+            hint = ("Run as Administrator for Windows Event Log access"
+                    if IS_WINDOWS else "Try running with sudo for /var/log access")
             return {
                 "error": "No readable log files found",
-                "hint": "Try running with sudo for /var/log access",
+                "hint": hint,
                 "logs_checked": [],
             }
 
@@ -184,19 +198,34 @@ class LogAnalyzer:
         }
 
     def check_active_sessions(self) -> list[dict]:
-        """Return currently logged-in users."""
+        """Return currently logged-in users (cross-platform)."""
         sessions = []
         try:
-            proc = subprocess.run(["who"], capture_output=True, text=True)
-            for line in proc.stdout.splitlines():
-                parts = line.split()
-                if len(parts) >= 2:
-                    sessions.append({
-                        "user": parts[0],
-                        "terminal": parts[1],
-                        "login_time": " ".join(parts[2:4]) if len(parts) > 3 else "",
-                        "from": parts[4] if len(parts) > 4 else "local",
-                    })
+            if IS_WINDOWS:
+                proc = subprocess.run(
+                    ["query", "user"],
+                    capture_output=True, text=True, timeout=10,
+                )
+                for line in proc.stdout.splitlines()[1:]:  # skip header
+                    parts = line.split()
+                    if parts:
+                        sessions.append({
+                            "user": parts[0].lstrip(">"),
+                            "terminal": parts[1] if len(parts) > 1 else "",
+                            "login_time": " ".join(parts[3:5]) if len(parts) > 4 else "",
+                            "from": "local",
+                        })
+            else:
+                proc = subprocess.run(["who"], capture_output=True, text=True)
+                for line in proc.stdout.splitlines():
+                    parts = line.split()
+                    if len(parts) >= 2:
+                        sessions.append({
+                            "user": parts[0],
+                            "terminal": parts[1],
+                            "login_time": " ".join(parts[2:4]) if len(parts) > 3 else "",
+                            "from": parts[4] if len(parts) > 4 else "local",
+                        })
         except Exception:
             pass
         return sessions
@@ -285,9 +314,11 @@ class LogAnalyzer:
         return None
 
     def _read_log(self, path: str, max_lines: int = 50000) -> list[str]:
-        """Read log file, handle rotation."""
+        """Read log file — plain text or Windows .evtx via wevtutil."""
         lines = []
         try:
+            if IS_WINDOWS and path.endswith(".evtx"):
+                return self._read_windows_evtx(path, max_lines)
             with open(path, "r", errors="ignore") as f:
                 lines = f.readlines()[-max_lines:]
         except PermissionError:
@@ -295,6 +326,45 @@ class LogAnalyzer:
         except Exception as e:
             print(f"[Analyzer] Error reading {path}: {e}")
         return [l.strip() for l in lines if l.strip()]
+
+    def _read_windows_evtx(self, evtx_path: str, max_lines: int = 2000) -> list[str]:
+        """
+        Export Windows Event Log to text using wevtutil (built into Windows).
+        Falls back to win32evtlog if available.
+        """
+        log_name = {
+            "Security.evtx": "Security",
+            "System.evtx":   "System",
+            "Application.evtx": "Application",
+        }.get(os.path.basename(evtx_path), "System")
+        lines = []
+        # Method 1: wevtutil (always available on Windows)
+        try:
+            proc = subprocess.run(
+                ["wevtutil", "qe", log_name,
+                 "/c:2000", "/rd:true", "/f:text"],
+                capture_output=True, text=True, timeout=30,
+            )
+            if proc.returncode == 0:
+                lines = [l.strip() for l in proc.stdout.splitlines() if l.strip()]
+                return lines[:max_lines]
+        except Exception as e:
+            print(f"[Analyzer] wevtutil failed: {e}")
+        # Method 2: win32evtlog (pywin32)
+        try:
+            import win32evtlog  # type: ignore
+            hand = win32evtlog.OpenEventLog(None, log_name)
+            flags = win32evtlog.EVENTLOG_BACKWARDS_READ | win32evtlog.EVENTLOG_SEQUENTIAL_READ
+            events = win32evtlog.ReadEventLog(hand, flags, 0)
+            for evt in events[:max_lines]:
+                msg = f"{evt.TimeGenerated} Source={evt.SourceName} EventID={evt.EventID}"
+                lines.append(msg)
+            win32evtlog.CloseEventLog(hand)
+        except ImportError:
+            pass
+        except Exception as e:
+            print(f"[Analyzer] win32evtlog failed: {e}")
+        return lines
 
     # ─────────────────────────────────────────
     #  THREAT SCANNING
