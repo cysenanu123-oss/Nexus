@@ -984,11 +984,14 @@ class Brain:
         location  = Path.home() / "Desktop"
 
         # Match: 'save it in a file called X', 'in a file called X on my desktop'
+        # Use greedy [\w\.\-]+ (no spaces) — filenames don't have spaces.
+        # The lazy +? was matching just one char ("a" from "ai_report").
         save_patterns = [
-            r"save\s+it\s+(?:inside|in|to|into)\s+(?:a\s+)?(?:file\s+)?(?:called\s+|named\s+)?(?:a file called |)[\"']?([\w\s\-\.]+?)[\"']?(?:\s+on\s+(?:my\s+)?(?:desktop|Desktop))?",
-            r"(?:inside|in|into)\s+(?:a\s+)?(?:word\s+)?(?:file\s+)?called\s+[\"']?([\w\s\-\.]+?)[\"']?(?:\s+on\s+(?:my\s+)?(?:desktop|Desktop))?",
-            r"(?:save|store|write)\s+(?:it\s+)?(?:as|to)\s+[\"']?([\w\s\-\.]+?)[\"']?(?:\s+on\s+(?:my\s+)?(?:desktop|Desktop))?",
-            r"(?:in|into|inside)\s+(?:a\s+)?(?:file\s+)?[\"']([\w\s\-\.]+?)[\"']",
+            r"(?:save|store|write)\s+it\s+(?:inside|in|to|into)\s+(?:a\s+)?(?:file\s+)?(?:called\s+|named\s+)?[\"']?([\w\.\-]+)[\"']?",
+            r"(?:inside|in|into)\s+(?:a\s+)?(?:word\s+)?(?:file\s+)?called\s+[\"']?([\w\.\-]+)[\"']?",
+            r"(?:save|store|write)\s+(?:it\s+)?(?:as|to)\s+[\"']?([\w\.\-]+)[\"']?",
+            r"(?:in|into|inside)\s+(?:a\s+)?(?:file\s+)?[\"']([\w\.\-]+)[\"']",
+            r"called\s+[\"']?([\w\.\-]+\.(?:txt|md|json|csv|pdf))[\"']?",
         ]
 
         raw_lower = text.lower()
@@ -996,7 +999,6 @@ class Brain:
             m = re.search(pat, text, re.I)
             if m:
                 raw_name = m.group(1).strip()
-                # Add .txt if no extension
                 if raw_name and '.' not in raw_name:
                     raw_name += '.txt'
                 save_file = raw_name
@@ -1008,19 +1010,28 @@ class Brain:
 
         # ── Extract topic (strip save-related suffix) ─────────────────
         topic = text
-        # Remove the save instruction part to get a clean research topic
+        # Remove ", save it ..." and " and save it ..." suffixes
         topic_clean = re.sub(
-            r"(?:,|\s+and)?\s+(?:save|store|write)\s+it.*$",
+            r"(?:,|\s+and)?\s+(?:save|store|write)\s+it\b.*$",
             "", topic, flags=re.I
         ).strip()
-        # Remove leading instruction words
+        # Remove leading instruction verbs: "research X", "do a report on X"
         topic_clean = re.sub(
             r"^(?:can you\s+)?(?:go online and\s+)?(?:do|give me)\s+(?:a\s+)?(?:full\s+)?(?:report|scan search|research)\s+(?:on|for|about)\s+",
             "", topic_clean, flags=re.I
         ).strip()
-        # Remove trailing location hints
         topic_clean = re.sub(
-            r"(?:,\s*)?(?:inside|in|to|into|save it).*$",
+            r"^(?:research|look up|find out about|tell me about)\s+",
+            "", topic_clean, flags=re.I
+        ).strip()
+        # Remove trailing "in a file called ..." / "on my desktop" suffixes
+        # Use \b word boundaries so "in" inside "intelligence" is NOT matched
+        topic_clean = re.sub(
+            r"(?:,\s*)?\b(?:inside|save it)\b.*$",
+            "", topic_clean, flags=re.I
+        ).strip()
+        topic_clean = re.sub(
+            r"(?:,\s*)?\s+(?:in|into)\s+(?:a\s+)?(?:file|folder)\b.*$",
             "", topic_clean, flags=re.I
         ).strip() or text
 

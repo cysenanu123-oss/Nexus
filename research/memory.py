@@ -186,6 +186,43 @@ class ResearchMemory:
 
     # ── Public API ────────────────────────────────────────────
 
+    # ── Quality gate ─────────────────────────────────────────────
+
+    _FEED_PATTERNS = [
+        "follow this topic", "share\ngraphic", "hours ago\n",
+        "days ago\n", "by maxwell", "by bloomberg", "more\npope",
+        "\nmore\n", "follow this topic\nshare",
+    ]
+
+    def _is_junk(self, text: str) -> bool:
+        """Return True if text looks like a raw news feed / nav dump."""
+        t = text.lower()
+        hits = sum(1 for p in self._FEED_PATTERNS if p in t)
+        # Also flag if ratio of short lines is very high (nav/feed structure)
+        lines = [l.strip() for l in text.splitlines() if l.strip()]
+        if lines:
+            short = sum(1 for l in lines if len(l) < 30)
+            if short / len(lines) > 0.55 and len(lines) > 20:
+                return True
+        return hits >= 2
+
+    def wipe_junk(self) -> int:
+        """Delete all stored entries that look like raw feed/nav dumps. Returns count deleted."""
+        bad_ids = [eid for eid, e in self._metadata.items()
+                   if self._is_junk(e.get("text", ""))]
+        if not bad_ids:
+            return 0
+        if self._collection is not None:
+            try:
+                self._collection.delete(ids=bad_ids)
+            except Exception as e:
+                log.warning("ChromaDB delete failed: %s", e)
+        for eid in bad_ids:
+            self._metadata.pop(eid, None)
+        self._save_metadata()
+        log.info("Wiped %d junk entries from research memory.", len(bad_ids))
+        return len(bad_ids)
+
     def store(
         self,
         topic:    str,
@@ -209,6 +246,10 @@ class ResearchMemory:
         -------
         str — entry ID
         """
+        if self._is_junk(text):
+            log.warning("Rejected junk content from %r — not storing in memory.", url)
+            return ""
+
         entry_id = self._make_id(topic, url)
 
         entry = MemoryEntry(

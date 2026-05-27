@@ -127,6 +127,10 @@ class Researcher:
         self.summarizer = Summarizer()
         self.memory     = ResearchMemory()
 
+        wiped = self.memory.wipe_junk()
+        if wiped:
+            log.info("Research memory: wiped %d junk entries on startup.", wiped)
+
         log.info(
             "Researcher ready — max_sources=%d, memory=%s",
             max_sources, use_memory,
