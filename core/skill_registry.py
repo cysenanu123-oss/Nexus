@@ -70,11 +70,11 @@ class SkillRegistry:
     def __init__(self, db_path: Path = _DB_PATH):
         self._db_path = db_path
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._init_db()
-        self._seed_builtins()
-        # Vector index for semantic skill search (Voyager pattern)
+        # Must be set before _seed_builtins() so _index_skill() can check it
         self._vector = None
         self._vector_indexed = False
+        self._init_db()
+        self._seed_builtins()
         self._init_vector_index()
 
     # ── Vector index (Voyager-style semantic retrieval) ───────
@@ -82,7 +82,7 @@ class SkillRegistry:
     def _init_vector_index(self):
         try:
             from core.vector_memory import VectorMemory
-            self._vector = VectorMemory(persist_path="data/skill_vectors")
+            self._vector = VectorMemory(persist_path=str(Path(__file__).parent.parent / "data" / "skill_vectors"))
             if not self._vector.ready:
                 self._vector = None
                 return
