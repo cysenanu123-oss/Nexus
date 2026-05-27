@@ -252,15 +252,38 @@ class Brain:
                 self.memory.log_training_pair(text, auto_result, "automation")
                 return auto_result
 
+        # ── Local-first guard: intercept things NEXUS knows without web ─────
+        # Time/date/simple questions must NEVER hit the research pipeline.
+        _LOCAL_PATTERNS = (
+            "what time", "what's the time", "whats the time",
+            "what day", "what date", "what year", "what month",
+            "what's today", "whats today", "today's date",
+            "current time", "current date",
+        )
+        if any(p in text.lower() for p in _LOCAL_PATTERNS):
+            from datetime import datetime
+            now = datetime.now()
+            response = (f"It's {now.strftime('%I:%M %p')} on "
+                        f"{now.strftime('%A, %B %d %Y')}.")
+            self.context.add_turn("user", text)
+            self.context.add_turn("nexus", response)
+            return response
+
         # ── Fast-path: research route bypasses intent engine entirely ─────
         if route.category.value == "research" or route.needs_internet:
+            # "what is" and "what are" are too broad — they match "what is the time",
+            # "what is your name", etc. Only use them for substantial topic queries.
             research_keywords = [
                 "report on", "tell me about", "everything about",
-                "who is", "who are", "when was", "what is", "what are",
+                "who is ", "who are ", "when was ",
                 "research", "find out", "look up", "information on",
                 "scan search on", "full report",
+                "what is the history", "what is the difference",
+                "what are the best", "what are some",
             ]
-            if any(kw in text.lower() for kw in research_keywords):
+            # Also require the query to be substantive (>= 5 words)
+            word_count = len(text.split())
+            if word_count >= 5 and any(kw in text.lower() for kw in research_keywords):
                 self.context.add_turn("user", text)
                 response = self._handle_research_request(text)
                 self.context.add_turn("nexus", response)
