@@ -23,10 +23,12 @@ import numpy as np
 
 from PyQt5.QtCore  import Qt, QTimer, QThread, pyqtSignal, QPoint, QPointF, QRectF
 from PyQt5.QtGui   import (QPainter, QColor, QRadialGradient, QLinearGradient,
-                            QPen, QBrush, QFont, QPainterPath)
+                            QPen, QBrush, QFont, QPainterPath, QRegion)
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget,
                               QVBoxLayout, QHBoxLayout, QLabel,
                               QPushButton, QTextEdit, QLineEdit, QFrame)
+
+_WIN = sys.platform == "win32"
 
 _ROOT = str(Path(__file__).parent.parent)
 if _ROOT not in sys.path:
@@ -520,13 +522,32 @@ class NexusApp(QMainWindow):
         self._drag_pos: Optional[QPoint] = None
 
         self.setWindowFlags(Qt.FramelessWindowHint)
-        self.setAttribute(Qt.WA_TranslucentBackground)
+
+        if _WIN:
+            # WA_TranslucentBackground makes window invisible on Windows —
+            # use solid dark background + rounded mask instead
+            pal = self.palette()
+            pal.setColor(self.backgroundRole(), QColor(2, 5, 14))
+            self.setPalette(pal)
+            self.setAutoFillBackground(True)
+        else:
+            self.setAttribute(Qt.WA_TranslucentBackground)
+
         self.setFixedSize(WIN_W, WIN_H)
 
-        geo = QApplication.primaryScreen().availableGeometry()
-        self.move((geo.width() - WIN_W) // 2, (geo.height() - WIN_H) // 2)
+        screen = QApplication.primaryScreen()
+        if screen:
+            geo = screen.availableGeometry()
+            self.move((geo.width() - WIN_W) // 2, (geo.height() - WIN_H) // 2)
 
         self._build_ui()
+
+        if _WIN:
+            # Clip to rounded rect so corners look clean on Windows
+            path = QPainterPath()
+            path.addRoundedRect(QRectF(0, 0, WIN_W, WIN_H), 18, 18)
+            self.setMask(QRegion(path.toFillPolygon().toPolygon()))
+
         self._start_worker(demo)
 
     # ── Layout ────────────────────────────────────────────────
@@ -750,22 +771,35 @@ def main():
     ap.add_argument("--demo", action="store_true")
     args = ap.parse_args()
 
-    app = QApplication(sys.argv)
-    app.setApplicationName("NEXUS")
-    app.setStyle("Fusion")
+    try:
+        app = QApplication(sys.argv)
+        app.setApplicationName("NEXUS")
+        app.setStyle("Fusion")
 
-    from PyQt5.QtGui import QPalette
-    pal = QPalette()
-    pal.setColor(QPalette.Window,     QColor(2,  5, 14))
-    pal.setColor(QPalette.WindowText, QColor(180, 200, 220))
-    pal.setColor(QPalette.Base,       QColor(3,  8, 20))
-    pal.setColor(QPalette.Text,       QColor(80, 140, 180))
-    app.setPalette(pal)
+        from PyQt5.QtGui import QPalette
+        pal = QPalette()
+        pal.setColor(QPalette.Window,     QColor(2,  5, 14))
+        pal.setColor(QPalette.WindowText, QColor(180, 200, 220))
+        pal.setColor(QPalette.Base,       QColor(3,  8, 20))
+        pal.setColor(QPalette.Text,       QColor(80, 140, 180))
+        app.setPalette(pal)
 
-    win = NexusApp(demo=args.demo)
-    win.setWindowTitle("NEXUS")
-    win.show()
-    sys.exit(app.exec_())
+        print("[NEXUS] Starting…")
+        win = NexusApp(demo=args.demo)
+        win.setWindowTitle("NEXUS")
+        win.show()
+        win.raise_()
+        win.activateWindow()
+        print("[NEXUS] Window shown — entering event loop")
+        sys.exit(app.exec_())
+
+    except Exception as e:
+        import traceback
+        print(f"\n[NEXUS] STARTUP ERROR: {e}")
+        traceback.print_exc()
+        if _WIN:
+            input("\nPress Enter to exit…")
+        sys.exit(1)
 
 
 if __name__ == "__main__":
