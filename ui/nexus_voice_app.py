@@ -521,11 +521,11 @@ class NexusApp(QMainWindow):
         super().__init__()
         self._drag_pos: Optional[QPoint] = None
 
+        print("[NEXUS] init: setting flags", flush=True)
         self.setWindowFlags(Qt.FramelessWindowHint)
 
         if _WIN:
-            # WA_TranslucentBackground makes window invisible on Windows —
-            # use solid dark background + rounded mask instead
+            print("[NEXUS] init: Windows mode — solid background", flush=True)
             pal = self.palette()
             pal.setColor(self.backgroundRole(), QColor(2, 5, 14))
             self.setPalette(pal)
@@ -533,22 +533,23 @@ class NexusApp(QMainWindow):
         else:
             self.setAttribute(Qt.WA_TranslucentBackground)
 
+        print("[NEXUS] init: setting size", flush=True)
         self.setFixedSize(WIN_W, WIN_H)
 
+        print("[NEXUS] init: setting position", flush=True)
         screen = QApplication.primaryScreen()
         if screen:
             geo = screen.availableGeometry()
-            self.move((geo.width() - WIN_W) // 2, (geo.height() - WIN_H) // 2)
+            x = max(0, (geo.width()  - WIN_W) // 2)
+            y = max(0, (geo.height() - WIN_H) // 2)
+            self.move(x, y)
 
+        print("[NEXUS] init: building UI", flush=True)
         self._build_ui()
 
-        if _WIN:
-            # Clip to rounded rect so corners look clean on Windows
-            path = QPainterPath()
-            path.addRoundedRect(QRectF(0, 0, WIN_W, WIN_H), 18, 18)
-            self.setMask(QRegion(path.toFillPolygon().toPolygon()))
-
+        print("[NEXUS] init: starting worker", flush=True)
         self._start_worker(demo)
+        print("[NEXUS] init: done", flush=True)
 
     # ── Layout ────────────────────────────────────────────────
 
@@ -772,6 +773,10 @@ def main():
     args = ap.parse_args()
 
     try:
+        # HiDPI support — must be set before QApplication
+        QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
+        QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps,    True)
+
         app = QApplication(sys.argv)
         app.setApplicationName("NEXUS")
         app.setStyle("Fusion")
