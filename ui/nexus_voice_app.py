@@ -375,14 +375,23 @@ class VoiceWorker(QThread):
         self._stop     = False
         self._trigger  = threading.Event()
 
+        # All voice module imports happen in run() on the worker thread
+        # so a bad import never kills the main/UI thread
         self._detector    = None
         self._listener    = None
         self._transcriber = None
         self._llm         = None
         self._speaker     = None
-        self._load()
+
+    def trigger(self):
+        self._trigger.set()
+
+    def stop(self):
+        self._stop = True
+        self._trigger.set()
 
     def _load(self):
+        """Load all voice modules. Runs on the worker thread, never main thread."""
         try:
             from voice.wakeword import WakeWordDetector
             self._detector = WakeWordDetector()
@@ -415,14 +424,10 @@ class VoiceWorker(QThread):
         except Exception:
             pass
 
-    def trigger(self):
-        self._trigger.set()
-
-    def stop(self):
-        self._stop = True
-        self._trigger.set()
-
     def run(self):
+        # Safe: all heavy imports happen here on the background thread
+        self._load()
+
         if self._listener:
             try:
                 self._listener.start()
@@ -549,7 +554,8 @@ class NexusApp(QMainWindow):
             self.move(x, y)
 
         self._build_ui()
-        self._start_worker(demo)
+        # Delay worker start — window must be visible before any voice imports run
+        QTimer.singleShot(400, lambda: self._start_worker(demo))
 
     # ── Layout ────────────────────────────────────────────────
 
