@@ -252,9 +252,9 @@ class Researcher:
         -------
         str — answer text
         """
-        # Check memory for existing knowledge
+        # Check memory for existing knowledge — only use high-relevance hits
         if not force_refresh and self.use_memory:
-            cached = self.memory.recall(question, max_results=3, min_relevance=0.55)
+            cached = self.memory.recall(question, max_results=3, min_relevance=0.78)
             if cached:
                 log.info("Answering from memory (relevance=%.2f)", cached[0].relevance)
                 # Re-synthesize from memory rather than dumping raw text

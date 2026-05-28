@@ -192,19 +192,35 @@ class ResearchMemory:
         "follow this topic", "share\ngraphic", "hours ago\n",
         "days ago\n", "by maxwell", "by bloomberg", "more\npope",
         "\nmore\n", "follow this topic\nshare",
+        "hours ago\nby ", "hours ago\nwired", "hours ago\ncnbc",
+        "hours ago\nfortune", "hours ago\nreuters",
+    ]
+    # Stub entries that sneak through as single-sentence "summaries"
+    _STUB_PATTERNS = [
+        "technology usually creates jobs for young",
+        "workers historically filled new tech",
+        "artificial intelligence\nfollow this topic",
+        "follow this topic\nshare",
     ]
 
     def _is_junk(self, text: str) -> bool:
-        """Return True if text looks like a raw news feed / nav dump."""
+        """Return True if text looks like a raw news feed / nav dump / stub."""
+        if not text or len(text.strip()) < 40:
+            return True
         t = text.lower()
-        hits = sum(1 for p in self._FEED_PATTERNS if p in t)
-        # Also flag if ratio of short lines is very high (nav/feed structure)
+        # Exact stub patterns
+        if any(p in t for p in self._STUB_PATTERNS):
+            return True
+        feed_hits = sum(1 for p in self._FEED_PATTERNS if p in t)
+        if feed_hits >= 2:
+            return True
+        # High ratio of short lines = nav/feed structure
         lines = [l.strip() for l in text.splitlines() if l.strip()]
         if lines:
             short = sum(1 for l in lines if len(l) < 30)
             if short / len(lines) > 0.55 and len(lines) > 20:
                 return True
-        return hits >= 2
+        return False
 
     def wipe_junk(self) -> int:
         """Delete all stored entries that look like raw feed/nav dumps. Returns count deleted."""
