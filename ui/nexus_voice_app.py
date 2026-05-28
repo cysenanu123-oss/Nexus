@@ -344,9 +344,19 @@ class RoundPanel(QWidget):
     def paintEvent(self, _):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
-        p.setPen(QPen(QColor(20, 45, 90, 120), 1))
-        p.setBrush(QColor(2, 5, 14))
-        p.drawRoundedRect(self.rect().adjusted(0, 0, -1, -1), 18, 18)
+        if _WIN:
+            # Solid fill — no transparency on Windows
+            p.setPen(Qt.NoPen)
+            p.setBrush(QColor(2, 5, 14))
+            p.drawRect(self.rect())
+            # Subtle border
+            p.setPen(QPen(QColor(20, 45, 90), 1))
+            p.setBrush(Qt.NoBrush)
+            p.drawRect(self.rect().adjusted(0, 0, -1, -1))
+        else:
+            p.setPen(QPen(QColor(20, 45, 90, 120), 1))
+            p.setBrush(QColor(2, 5, 14))
+            p.drawRoundedRect(self.rect().adjusted(0, 0, -1, -1), 18, 18)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -521,22 +531,16 @@ class NexusApp(QMainWindow):
         super().__init__()
         self._drag_pos: Optional[QPoint] = None
 
-        print("[NEXUS] init: setting flags", flush=True)
-        self.setWindowFlags(Qt.FramelessWindowHint)
-
         if _WIN:
-            print("[NEXUS] init: Windows mode — solid background", flush=True)
-            pal = self.palette()
-            pal.setColor(self.backgroundRole(), QColor(2, 5, 14))
-            self.setPalette(pal)
-            self.setAutoFillBackground(True)
+            # Normal window on Windows — frameless is unreliable cross-config
+            self.setWindowFlags(Qt.Window)
+            self.setWindowTitle("NEXUS")
         else:
+            self.setWindowFlags(Qt.FramelessWindowHint)
             self.setAttribute(Qt.WA_TranslucentBackground)
 
-        print("[NEXUS] init: setting size", flush=True)
         self.setFixedSize(WIN_W, WIN_H)
 
-        print("[NEXUS] init: setting position", flush=True)
         screen = QApplication.primaryScreen()
         if screen:
             geo = screen.availableGeometry()
@@ -544,12 +548,8 @@ class NexusApp(QMainWindow):
             y = max(0, (geo.height() - WIN_H) // 2)
             self.move(x, y)
 
-        print("[NEXUS] init: building UI", flush=True)
         self._build_ui()
-
-        print("[NEXUS] init: starting worker", flush=True)
         self._start_worker(demo)
-        print("[NEXUS] init: done", flush=True)
 
     # ── Layout ────────────────────────────────────────────────
 
@@ -773,7 +773,6 @@ def main():
     args = ap.parse_args()
 
     try:
-        # HiDPI support — must be set before QApplication
         QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
         QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps,    True)
 
@@ -783,27 +782,24 @@ def main():
 
         from PyQt5.QtGui import QPalette
         pal = QPalette()
-        pal.setColor(QPalette.Window,     QColor(2,  5, 14))
-        pal.setColor(QPalette.WindowText, QColor(180, 200, 220))
-        pal.setColor(QPalette.Base,       QColor(3,  8, 20))
-        pal.setColor(QPalette.Text,       QColor(80, 140, 180))
+        pal.setColor(QPalette.Window,      QColor(2,  5, 14))
+        pal.setColor(QPalette.WindowText,  QColor(180, 200, 220))
+        pal.setColor(QPalette.Base,        QColor(3,  8, 20))
+        pal.setColor(QPalette.AlternateBase, QColor(5, 10, 25))
+        pal.setColor(QPalette.Text,        QColor(80, 140, 180))
+        pal.setColor(QPalette.Button,      QColor(5, 12, 28))
+        pal.setColor(QPalette.ButtonText,  QColor(80, 140, 180))
         app.setPalette(pal)
 
-        print("[NEXUS] Starting…")
         win = NexusApp(demo=args.demo)
-        win.setWindowTitle("NEXUS")
         win.show()
         win.raise_()
         win.activateWindow()
-        print("[NEXUS] Window shown — entering event loop")
         sys.exit(app.exec_())
 
     except Exception as e:
         import traceback
-        print(f"\n[NEXUS] STARTUP ERROR: {e}")
         traceback.print_exc()
-        if _WIN:
-            input("\nPress Enter to exit…")
         sys.exit(1)
 
 
