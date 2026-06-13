@@ -313,7 +313,7 @@ class Executor:
     # ── Step runner ───────────────────────────────────────────
 
     def _run_step(self, step, dry_run: bool = False) -> StepResult:
-        """Execute a single step with retry logic."""
+        """Execute a single step with advanced retry logic."""
         if dry_run:
             log.info("[DRY RUN] %s", step)
             return StepResult(
@@ -324,46 +324,34 @@ class Executor:
             )
 
         log.info("Running: %s", step)
-        attempt = 0
-        last_error = ""
 
-        while attempt <= step.retry:
-            t0 = time.time()
-            try:
-                success, output = self._dispatch_step(step)
-                elapsed = time.time() - t0
+        # Use new retry system for robust execution
+        from core.retry_system import RetryExecutor, RetryConfig
 
-                if success:
-                    return StepResult(
-                        step_index  = step.index,
-                        step_desc   = step.description,
-                        success     = True,
-                        output      = output,
-                        elapsed_sec = elapsed,
-                        retried     = attempt,
-                    )
-                else:
-                    last_error = output
-                    log.warning("Step %d failed (attempt %d/%d): %s",
-                                step.index, attempt + 1, step.retry + 1, output)
+        # Configure retry based on step settings
+        max_attempts = max(step.retry + 1, 5)  # Ensure at least 5 attempts
+        config = RetryConfig(
+            max_attempts=max_attempts,
+            base_timeout=getattr(step, 'timeout', 30.0)
+        )
 
-            except Exception as e:
-                elapsed    = time.time() - t0
-                last_error = str(e)
-                log.error("Step %d raised exception (attempt %d/%d): %s",
-                          step.index, attempt + 1, step.retry + 1, e)
+        executor = RetryExecutor(config)
 
-            attempt += 1
-            if attempt <= step.retry:
-                time.sleep(1.0)   # brief pause before retry
+        # Create a wrapper function for the step execution
+        def execute_step():
+            return self._dispatch_step(step)
+
+        # Execute with retry system
+        retry_result = executor.execute_with_retry(execute_step)
 
         return StepResult(
             step_index  = step.index,
             step_desc   = step.description,
-            success     = False,
-            error       = last_error,
-            elapsed_sec = time.time() - t0 if 't0' in dir() else 0.0,
-            retried     = attempt - 1,
+            success     = retry_result.success,
+            output      = retry_result.final_stdout if retry_result.success else "",
+            error       = retry_result.failure_reason if not retry_result.success else "",
+            elapsed_sec = retry_result.total_elapsed,
+            retried     = max(0, retry_result.attempt_count - 1),
         )
 
     # ── Step dispatcher ───────────────────────────────────────

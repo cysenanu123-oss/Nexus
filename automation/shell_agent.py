@@ -389,27 +389,31 @@ class ShellAgent:
 
         log.info("Running command: %r (timeout=%.1fs)", cmd, timeout)
 
-        try:
-            result = subprocess.run(
-                cmd,
-                shell=True,
-                capture_output=True,
-                text=True,
-                timeout=float(timeout),
-                cwd=os.getcwd(),
-            )
-            output = (result.stdout or result.stderr or "").strip()
-            success = result.returncode == 0
+        # Use retry system for robust command execution
+        from core.retry_system import execute_shell_with_retry
 
-            if not success:
-                log.warning("Command exited %d: %s", result.returncode, output[:200])
+        result = execute_shell_with_retry(
+            command=cmd,
+            max_attempts=5,
+            timeout=float(timeout),
+            cwd=os.getcwd()
+        )
 
-            return success, output or "(no output)"
+        if result.success:
+            output = (result.final_stdout or result.final_stderr or "").strip()
+            return True, output or "(no output)"
+        else:
+            # Log retry attempts for debugging
+            log.warning("Command failed after %d attempts: %s",
+                       result.attempt_count, result.failure_reason)
+            if result.attempts:
+                for attempt in result.attempts[-3:]:  # Log last 3 attempts
+                    log.debug("Attempt %d [%s]: %s",
+                             attempt.attempt_number,
+                             attempt.strategy.value,
+                             attempt.stderr or str(attempt.error))
 
-        except subprocess.TimeoutExpired:
-            return False, f"Command timed out after {timeout}s"
-        except Exception as e:
-            return False, str(e)
+            return False, result.failure_reason
 
     # ── File operations ───────────────────────────────────────
 

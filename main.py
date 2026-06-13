@@ -308,6 +308,21 @@ HELP_TEXT = f"""
   {Color.BRIGHT_MAGENTA}list my skills{Color.RESET}
   {Color.BRIGHT_MAGENTA}search skills for email{Color.RESET}
 
+{Color.BRIGHT_BLUE}{Color.BOLD}PREDICTION & MARKET ANALYSIS{Color.RESET}
+  {Color.BRIGHT_BLUE}predict <question>{Color.RESET}          Make AI predictions on any event
+  {Color.BRIGHT_BLUE}predict crypto bitcoin{Color.RESET}      Predict cryptocurrency price movements
+  {Color.BRIGHT_BLUE}market analysis crypto{Color.RESET}      Get comprehensive market analysis
+  {Color.BRIGHT_BLUE}market summary{Color.RESET}              Current market overview and trends
+  {Color.BRIGHT_BLUE}crypto summary{Color.RESET}              Cryptocurrency market data and sentiment
+  {Color.BRIGHT_BLUE}prediction performance{Color.RESET}      View prediction accuracy statistics
+  {Color.BRIGHT_BLUE}prediction markets{Color.RESET}          Browse active prediction markets
+
+  {Color.DIM}Natural language examples (just say them):{Color.RESET}
+  {Color.BRIGHT_BLUE}Will Bitcoin reach $100k by end of 2025?{Color.RESET}
+  {Color.BRIGHT_BLUE}predict ethereum price movement{Color.RESET}
+  {Color.BRIGHT_BLUE}analyze the crypto market{Color.RESET}
+  {Color.BRIGHT_BLUE}forecast Tesla stock performance{Color.RESET}
+
 {Color.DIM}Say anything else and NEXUS routes it through brain → LLM → web research.{Color.RESET}
 """
 
@@ -324,6 +339,7 @@ MODULE_REGISTRY = {
     "cyber":       {"status": "ACTIVE",      "desc": "Scanning, recon, vuln scan, sandbox, threat intel, CVE/exploit search, news"},
     "coding":      {"status": "ACTIVE",      "desc": "Code engine — narrated planning, file analysis, self-learning"},
     "skills":      {"status": "ACTIVE",      "desc": "Skill registry, acquirer, task planner — learn/create/invoke skills"},
+    "prediction":  {"status": "ACTIVE",      "desc": "AI prediction engine — market forecasting, event prediction, trading analysis"},
     "security":    {"status": "NOT STARTED", "desc": "Permissions & auth"},
 }
 
@@ -415,26 +431,60 @@ def cmd_shell(args: list[str]):
         return
     command = " ".join(args)
     Printer.warn(f"Executing shell command: {command}")
+
+    # Use retry system for robust shell execution
     try:
-        result = subprocess.run(
-            command,
-            shell=True,
-            capture_output=True,
-            text=True,
-            timeout=30,
+        from core.retry_system import execute_shell_with_retry
+
+        result = execute_shell_with_retry(
+            command=command,
+            max_attempts=5,
+            timeout=30.0
         )
-        if result.stdout:
-            print(result.stdout)
-        if result.stderr:
-            print(f"{Color.BRIGHT_RED}{result.stderr}{Color.RESET}")
-        if result.returncode != 0:
-            Printer.error(f"Command exited with code {result.returncode}")
+
+        if result.success:
+            if result.final_stdout:
+                print(result.final_stdout)
+            if result.final_stderr:
+                print(f"{Color.BRIGHT_RED}{result.final_stderr}{Color.RESET}")
+
+            successful_attempt = result.successful_attempt
+            if successful_attempt and successful_attempt.attempt_number > 1:
+                Printer.ok(f"Done after {result.attempt_count} attempt(s) using {successful_attempt.strategy.value} strategy.")
+            else:
+                Printer.ok("Done.")
         else:
-            Printer.ok("Done.")
-    except subprocess.TimeoutExpired:
-        Printer.error("Command timed out after 30 seconds.")
+            Printer.error(f"Command failed after {result.attempt_count} attempts: {result.failure_reason}")
+
+            # Show brief retry summary
+            if result.attempts:
+                Printer.warn(f"Tried strategies: {', '.join(a.strategy.value for a in result.attempts)}")
+
+    except ImportError:
+        # Fallback to original implementation if retry system is not available
+        Printer.warn("Retry system not available, using simple execution")
+        try:
+            result = subprocess.run(
+                command,
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            if result.stdout:
+                print(result.stdout)
+            if result.stderr:
+                print(f"{Color.BRIGHT_RED}{result.stderr}{Color.RESET}")
+            if result.returncode != 0:
+                Printer.error(f"Command exited with code {result.returncode}")
+            else:
+                Printer.ok("Done.")
+        except subprocess.TimeoutExpired:
+            Printer.error("Command timed out after 30 seconds.")
+        except Exception as exc:
+            Printer.error(f"Shell error: {exc}")
     except Exception as exc:
-        Printer.error(f"Shell error: {exc}")
+        Printer.error(f"Retry system error: {exc}")
 
 
 def cmd_knowledge(brain=None):
