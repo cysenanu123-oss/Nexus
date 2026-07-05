@@ -55,6 +55,8 @@ from datetime import datetime, date, timedelta
 from pathlib import Path
 from typing import Any, Optional
 
+from core.shell_safety import safe_run, ShellSafetyError
+
 log = logging.getLogger("nexus.autonomous_planner")
 
 _PLAN_LOG = Path(__file__).parent.parent / "data" / "plan_history.jsonl"
@@ -660,7 +662,10 @@ class AutonomousPlanner:
             cmd = p.get("cmd", "")
             if not cmd:
                 return "No command specified"
-            proc = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=30)
+            try:
+                proc = safe_run(cmd, timeout=30)
+            except ShellSafetyError as exc:
+                return f"(refused unsafe command: {exc})"
             return proc.stdout.strip() or proc.stderr.strip() or "(no output)"
 
         if a == "shell_cmd":
@@ -670,7 +675,10 @@ class AutonomousPlanner:
                 # Fallback: direct subprocess
                 cmd = p.get("cmd", p.get("target", ""))
                 if cmd:
-                    proc = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=30)
+                    try:
+                        proc = safe_run(cmd, timeout=30)
+                    except ShellSafetyError as exc:
+                        return f"(refused unsafe command: {exc})"
                     return proc.stdout.strip() or proc.stderr.strip() or "(no output)"
                 return "ShellAgent unavailable and no command specified"
 

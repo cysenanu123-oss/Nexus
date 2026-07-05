@@ -28,6 +28,8 @@ import platform
 import os
 import sys
 from dataclasses import dataclass
+
+from core.shell_safety import safe_run, ShellSafetyError
 from typing import Optional
 
 # Add project root to path so we can import 'core'
@@ -301,19 +303,18 @@ def _handle_run_command(intent: Intent) -> ActionResult:
             f"Add it to SAFE_COMMANDS in core/dispatcher.py to allow it.",
         )
 
+    # The whitelist only guards the first token; safe_run refuses shell
+    # operators and destructive commands, and runs with shell=False so
+    # ``ls; rm -rf ~`` cannot smuggle a second command past the check.
     try:
-        result = subprocess.run(
-            raw_cmd,
-            shell=True,
-            capture_output=True,
-            text=True,
-            timeout=15,
-        )
+        result = safe_run(raw_cmd, timeout=15)
         output = (result.stdout or result.stderr or "").strip()
         return ActionResult(
             result.returncode == 0,
             output or "(no output)",
         )
+    except ShellSafetyError as e:
+        return ActionResult(False, f"Refused by safety layer: {e}")
     except subprocess.TimeoutExpired:
         return ActionResult(False, "Command timed out after 15 seconds.")
     except Exception as e:

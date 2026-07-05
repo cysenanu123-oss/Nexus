@@ -33,6 +33,7 @@ from core.stream_output       import get_output
 from core.knowledge           import get_knowledge_base
 from core.normalizer          import get_normalizer, NormalizedInput
 from core.entry_model         import get_entry_model, Cat
+from core.command_router       import CommandRouter
 from core.autonomous_planner  import AutonomousPlanner
 from core.skill_registry      import get_registry
 from core.task_planner        import get_task_planner
@@ -60,8 +61,16 @@ class Brain:
         response = brain.think("remember my exam is on friday")
     """
 
-    def __init__(self, user_name: str = "Cyril", use_llm: bool = True):
+    def __init__(self, user_name: str | None = None, use_llm: bool = True):
         log.info("Brain initializing...")
+
+        # Owner name: explicit arg > config (identity.owner_name) > fallback.
+        if user_name is None:
+            try:
+                from core.config import cfg
+                user_name = cfg.get("identity.owner_name", "User")
+            except Exception:
+                user_name = "User"
 
         self.context    = Context()
         self.context.user_name = user_name
@@ -191,7 +200,141 @@ class Brain:
         self.persona = PersonaManager(llm=self.llm)
         log.info("PersonaManager ready — %d personas.", self.persona.count())
 
-        log.info("Brain ready.")
+        # ── Prediction Engine (FutureShow integration) ─────────────────────────
+        try:
+            from core.prediction_engine import get_prediction_engine
+            from core.market_data import get_market_data
+            self.prediction_engine = get_prediction_engine(llm=self.llm, researcher=self.researcher)
+            self.market_data = get_market_data()
+            log.info("PredictionEngine + MarketData ready.")
+        except Exception as e:
+            self.prediction_engine = None
+            self.market_data = None
+            log.warning(f"PredictionEngine unavailable: {e}")
+
+        # ── Tiered brain router (reflex → local → cloud, consent-gated) ─────
+        try:
+            from core.brain_router import BrainRouter, build_default_backends
+            from core.config import cfg
+            backends = build_default_backends(
+                self.llm, model_manager=self._get_model_manager(), cfg=cfg)
+            # Optional prompt-engineer pre-stage (off by default).
+            prompt_eng = None
+            if cfg.get("llm.prompt_engineering", False):
+                from core.prompt_engineer import PromptEngineer
+                prompt_eng = PromptEngineer(
+                    llm=self.llm,
+                    allow_rewrite=bool(cfg.get("llm.prompt_rewrite", False)),
+                )
+            self.router = BrainRouter(
+                backends,
+                allow_cloud=bool(cfg.get("llm.allow_cloud", False)),
+                cloud_confirm=bool(cfg.get("llm.cloud_confirm", True)),
+                prompt_engineer=prompt_eng,
+            )
+            log.info("BrainRouter ready — %d backend(s).", len(self.router.backends))
+        except Exception as e:
+            self.router = None
+            log.warning(f"BrainRouter unavailable: {e}")
+
+        # ── Autonomous web-research agent (search → read → refine → answer) ─
+        try:
+            from core.web_agent import build_default as _build_web_agent
+            self.web_agent = _build_web_agent(llm=self.llm)
+            if self.web_agent:
+                log.info("WebAgent ready.")
+        except Exception as e:
+            self.web_agent = None
+            log.warning(f"WebAgent unavailable: {e}")
+
+        # ── Perception: scene description (VLM) + place recognition ─────────
+        try:
+            from vision.scene_describer import SceneDescriber
+            self.scene_describer = SceneDescriber(
+                llm=self.llm, model_manager=self._get_model_manager())
+            log.info("SceneDescriber ready.")
+        except Exception as e:
+            self.scene_describer = None
+            log.warning(f"SceneDescriber unavailable: {e}")
+        try:
+            from vision.place_recognition import PlaceRecognizer, CLIPEmbedder
+            # CLIPEmbedder is lazy — no torch loaded until a frame is embedded.
+            self.place_recognizer = PlaceRecognizer(CLIPEmbedder())
+            log.info("PlaceRecognizer ready (%d place(s) enrolled).",
+                     len(self.place_recognizer.store.names()))
+        except Exception as e:
+            self.place_recognizer = None
+            log.warning(f"PlaceRecognizer unavailable: {e}")
+
+        # ── Always-on fusion loop + proactivity (built, not started) ───────
+        # Fuses perception/screen into a live WorldState and can speak up
+        # proactively. Left stopped by default (needs a camera; opt in with
+        # `awareness start`).
+        try:
+            from core.fusion_loop import FusionLoop, build_default_sensors
+            self.fusion = FusionLoop(
+                build_default_sensors(self),
+                on_message=self._proactive,
+            )
+            log.info("FusionLoop ready — %d sensor(s), not started.",
+                     len(self.fusion.sensors))
+        except Exception as e:
+            self.fusion = None
+            log.warning(f"FusionLoop unavailable: {e}")
+
+        # ── Subsystem health ─────────────────────────────────────────────
+        # Many subsystems degrade to None on import/init failure. Rather than
+        # let that stay silent (and surface later as an AttributeError), record
+        # what actually came up so `status` can report it and callers can check.
+        self._refresh_subsystem_status()
+        down = [n for n, ok in self.subsystem_status.items() if not ok]
+        if down:
+            log.warning("Brain ready with %d subsystem(s) unavailable: %s",
+                        len(down), ", ".join(down))
+        else:
+            log.info("Brain ready — all subsystems up.")
+
+    # ─────────────────────────────────────────────
+    # Subsystem health
+    # ─────────────────────────────────────────────
+
+    # attribute name → human label. A subsystem is "up" when its attribute
+    # is not None (the init blocks above set it to None on failure).
+    _SUBSYSTEMS: tuple[tuple[str, str], ...] = (
+        ("llm",               "Local LLM (Ollama)"),
+        ("memory",            "Memory manager"),
+        ("researcher",        "Research pipeline"),
+        ("_code_engine",      "Code engine"),
+        ("coder",             "Coding assistant"),
+        ("vision",            "Vision / screen OCR"),
+        ("cyber",             "Cybersecurity module"),
+        ("_skill_registry",   "Skill registry"),
+        ("_task_planner",     "Task planner"),
+        ("prediction_engine", "Prediction engine"),
+        ("market_data",       "Market data"),
+        ("router",            "Tiered brain router"),
+        ("web_agent",         "Autonomous web-research agent"),
+        ("scene_describer",   "Scene description (VLM)"),
+        ("place_recognizer",  "Place recognition"),
+        ("fusion",            "Awareness / fusion loop"),
+    )
+
+    def _refresh_subsystem_status(self) -> None:
+        self.subsystem_status: dict[str, bool] = {
+            label: getattr(self, attr, None) is not None
+            for attr, label in self._SUBSYSTEMS
+        }
+
+    def status_report(self) -> str:
+        """Human-readable health of every optional subsystem."""
+        self._refresh_subsystem_status()
+        lines = ["── NEXUS Subsystem Health ─────────────────"]
+        for label, ok in self.subsystem_status.items():
+            mark = "✓ up  " if ok else "✗ down"
+            lines.append(f"  {mark}  {label}")
+        up = sum(self.subsystem_status.values())
+        lines.append(f"  ── {up}/{len(self.subsystem_status)} subsystems available ──")
+        return "\n".join(lines)
 
     # ─────────────────────────────────────────────
     # Main entry point
@@ -355,6 +498,91 @@ class Brain:
         "bye", "goodbye", "see you", "later",
     })
 
+    # ── Exact-match command handlers (registered in the command router) ──
+    def _cmd_graph(self, _text: str = "") -> str:
+        return self.kg.visualize()
+
+    def _cmd_trends(self, _text: str = "") -> str:
+        return self.trends.weekly_report()
+
+    def _cmd_focus(self, _text: str = "") -> str:
+        sessions = self.trends.get_focus_sessions(limit=5)
+        if not sessions:
+            return "No focus sessions detected yet."
+        lines = ["── Recent Focus Sessions ──"]
+        for s in sessions:
+            lines.append(f"  {s['started_str']} — {s['duration_min']}min, "
+                         f"{s['command_count']} commands ({s['top_intent']})")
+        return "\n".join(lines)
+
+    def _cmd_reflections(self, _text: str = "") -> str:
+        refs = self.reflexion.all_reflections(limit=10)
+        if not refs:
+            return "No reflections stored yet. Use 'mark bad [correction]' after a wrong response."
+        lines = ["── Stored Reflections ─────────────────────"]
+        for r in refs:
+            lines.append(f"  #{r['id']} [{r['times_used']}x used] {r['reflection'][:100]}")
+        return "\n".join(lines)
+
+    def _cmd_memory_blocks(self, _text: str = "") -> str:
+        blocks = self.sleep_compute.all_blocks()
+        lines = ["── NEXUS Memory Blocks ────────────────────"]
+        for label, value in blocks.items():
+            if value.strip():
+                lines.append(f"\n[{label.upper()}]\n{value}")
+        return "\n".join(lines) if len(lines) > 1 else "Memory blocks are empty."
+
+    def _cmd_consolidate(self, _text: str = "") -> str:
+        self.sleep_compute.consolidate()
+        return "Memory consolidation complete. Blocks updated."
+
+    def _cmd_clear_persona(self, _text: str = "") -> str:
+        self.persona.clear()
+        return "Persona cleared — back to NEXUS default."
+
+    def _cmd_list_personas(self, _text: str = "") -> str:
+        cats = self.persona.list_categories()
+        lines = [f"Personas — {self.persona.count()} total:"]
+        for cat, names in cats.items():
+            if names:
+                lines.append(f"  {cat.upper()} ({len(names)}): "
+                             f"{', '.join(names[:4])}{'...' if len(names) > 4 else ''}")
+        lines.append(f"\nActive: [{self.persona.active_name}]")
+        lines.append("Usage: act as cyber security specialist | act as python debugger | clear persona")
+        return "\n".join(lines)
+
+    def _exact_command_router(self) -> CommandRouter:
+        """Build (once) the registry of exact-match commands that used to be a
+        long if/elif chain in _route. First-match-wins, same as before."""
+        cached = getattr(self, "_cmd_router_cache", None)
+        if cached is not None:
+            return cached
+        r = CommandRouter()
+        (r.exact("end session", "end conversation", "save session", "summarize session",
+                 to=lambda _t: self._cmd_end_session(), label="end-session")
+          .exact("sessions", "show sessions", "conversation history", "my conversations",
+                 to=lambda _t: self._cmd_show_sessions(), label="sessions")
+          .exact("actions", "action items", "pending actions", "my tasks", "todo list",
+                 to=lambda _t: self._cmd_pending_actions(), label="actions")
+          .exact("graph", "knowledge graph", "show graph", "what do you know",
+                 to=self._cmd_graph, label="graph")
+          .exact("trends", "my trends", "usage trends", "weekly report",
+                 to=self._cmd_trends, label="trends")
+          .exact("focus sessions", "focus", "my focus",
+                 to=self._cmd_focus, label="focus")
+          .exact("reflections", "my reflections", "what have i taught you",
+                 to=self._cmd_reflections, label="reflections")
+          .exact("memory blocks", "who am i", "what do you know about me",
+                 to=self._cmd_memory_blocks, label="memory-blocks")
+          .exact("consolidate", "run sleep compute", "update memory",
+                 to=self._cmd_consolidate, label="consolidate")
+          .exact("clear persona", "reset persona", "back to nexus", "disable persona", "remove persona",
+                 to=self._cmd_clear_persona, label="clear-persona")
+          .exact("personas", "list personas", "show personas", "what personas",
+                 to=self._cmd_list_personas, label="list-personas"))
+        self._cmd_router_cache = r
+        return r
+
     def _route(self, text, intent, decision) -> str:
         t_lower = text.lower()
 
@@ -386,26 +614,18 @@ class Brain:
                                        "work out how to", "how would you", "figure this out")):
             return self._cmd_task_plan(text)
 
-        # ── Session / conversation commands ──────────────────────────────
-        if t_lower.strip() in ("end session", "end conversation", "save session", "summarize session"):
-            return self._cmd_end_session()
+        # ── Exact-match command groups (session, actions, graph, trends,
+        #    reflections, memory blocks, persona list) via the router ───────
+        hit = self._exact_command_router().dispatch(t_lower)
+        if hit is not None:
+            return hit
 
-        if t_lower.strip() in ("sessions", "show sessions", "conversation history", "my conversations"):
-            return self._cmd_show_sessions()
-
+        # ── Parametric commands (need an argument → kept as prefix checks) ─
         if t_lower.startswith("session ") and t_lower.split()[1].isdigit():
             return self._cmd_session_detail(int(t_lower.split()[1]))
 
-        # ── Action items commands ─────────────────────────────────────────
-        if t_lower.strip() in ("actions", "action items", "pending actions", "my tasks", "todo list"):
-            return self._cmd_pending_actions()
-
         if t_lower.startswith("done ") and t_lower.split()[1].isdigit():
             return self._cmd_complete_action(int(t_lower.split()[1]))
-
-        # ── Knowledge graph commands ──────────────────────────────────────
-        if t_lower.strip() in ("graph", "knowledge graph", "show graph", "what do you know"):
-            return self.kg.visualize()
 
         if t_lower.startswith("who is ") or t_lower.startswith("what is "):
             entity = text[7:].strip()
@@ -417,42 +637,6 @@ class Brain:
                 for r in info.get("incoming", [])[:3]:
                     lines.append(f"  ← {r['from']} {r['relation']}")
                 return "\n".join(lines)
-
-        # ── Trends commands ───────────────────────────────────────────────
-        if t_lower.strip() in ("trends", "my trends", "usage trends", "weekly report"):
-            return self.trends.weekly_report()
-
-        if t_lower.strip() in ("focus sessions", "focus", "my focus"):
-            sessions = self.trends.get_focus_sessions(limit=5)
-            if not sessions:
-                return "No focus sessions detected yet."
-            lines = ["── Recent Focus Sessions ──"]
-            for s in sessions:
-                lines.append(f"  {s['started_str']} — {s['duration_min']}min, {s['command_count']} commands ({s['top_intent']})")
-            return "\n".join(lines)
-
-        # ── Reflexion commands ────────────────────────────────────────────
-        if t_lower.strip() in ("reflections", "my reflections", "what have i taught you"):
-            refs = self.reflexion.all_reflections(limit=10)
-            if not refs:
-                return "No reflections stored yet. Use 'mark bad [correction]' after a wrong response."
-            lines = ["── Stored Reflections ─────────────────────"]
-            for r in refs:
-                lines.append(f"  #{r['id']} [{r['times_used']}x used] {r['reflection'][:100]}")
-            return "\n".join(lines)
-
-        # ── Sleep compute / memory blocks ────────────────────────────────
-        if t_lower.strip() in ("memory blocks", "who am i", "what do you know about me"):
-            blocks = self.sleep_compute.all_blocks()
-            lines = ["── NEXUS Memory Blocks ────────────────────"]
-            for label, value in blocks.items():
-                if value.strip():
-                    lines.append(f"\n[{label.upper()}]\n{value}")
-            return "\n".join(lines) if len(lines) > 1 else "Memory blocks are empty."
-
-        if t_lower.strip() in ("consolidate", "run sleep compute", "update memory"):
-            self.sleep_compute.consolidate()
-            return "Memory consolidation complete. Blocks updated."
 
         # ── Orchestrator ─────────────────────────────────────────────────
         if t_lower.startswith("orchestrate ") or t_lower.startswith("multi-agent "):
@@ -477,19 +661,8 @@ class Brain:
                 return f"Persona activated: [{match['act']}]\n\"{match['prompt'][:120]}...\""
             return f"No persona found matching '{query}'. Try: personas cyber / personas code"
 
-        if t_lower.strip() in ("clear persona", "reset persona", "back to nexus", "disable persona", "remove persona"):
-            self.persona.clear()
-            return "Persona cleared — back to NEXUS default."
-
-        if t_lower.strip() in ("personas", "list personas", "show personas", "what personas", "persona list"):
-            cats = self.persona.list_categories()
-            lines = [f"Personas — {self.persona.count()} total:"]
-            for cat, names in cats.items():
-                if names:
-                    lines.append(f"  {cat.upper()} ({len(names)}): {', '.join(names[:4])}{'...' if len(names) > 4 else ''}")
-            lines.append(f"\nActive: [{self.persona.active_name}]")
-            lines.append("Usage: act as cyber security specialist | act as python debugger | clear persona")
-            return "\n".join(lines)
+        # ("clear persona" and the "personas" listing are handled by the
+        #  exact-match command router above.)
 
         if t_lower.startswith("personas ") or t_lower.startswith("search personas "):
             query = t_lower.split(None, 1)[1]
@@ -506,6 +679,13 @@ class Brain:
                 p = self.persona.active
                 return f"Active persona: [{p['act']}]\n{p['prompt'][:300]}"
             return "No active persona — running as NEXUS default."
+
+        # ── Prediction Engine commands ────────────────────────────────────
+        if self.prediction_engine and any(t in t_lower for t in ["predict", "prediction", "forecast", "market analysis"]):
+            return self._handle_prediction_commands(text)
+
+        if self.market_data and any(t in t_lower for t in ["market summary", "crypto summary", "market data"]):
+            return self._handle_market_data_commands(text)
 
         # ── Cyber fast-path (broad keyword match, before intent engine) ───
         if self.cyber and any(trigger in t_lower for trigger in self._CYBER_DIRECT_TRIGGERS):
@@ -756,22 +936,45 @@ class Brain:
             except Exception as e:
                 log.warning(f"Stage 1 failed: {e}")
 
-        # ── Stage 2: Domain-aware LLM (no context) ────────────────
+        # ── Stage 2: Domain-aware reasoning ───────────────────────
+        # When llm.tiered_routing is enabled, this stage runs through the
+        # tiered brain router (reflex → local → cloud, escalating on
+        # uncertainty). Otherwise it calls the local model directly, exactly
+        # as before. Cloud in this non-interactive path is only reached if the
+        # user set llm.cloud_confirm=False (opting into automatic escalation).
         if self.llm and self.llm.is_ready:
             domain = self._detect_domain(text)
             task   = self._domain_to_task(domain)
-            log.info(f"Stage 2: Domain-aware LLM (domain={domain}, task={task})")
+            base_system2 = self._build_domain_prompt(domain)
+            system_prompt2 = (persona_prefix + "\n\n" + base_system2) if self.persona.active else base_system2
+
+            use_router = False
             try:
-                base_system2 = self._build_domain_prompt(domain)
-                system_prompt2 = (persona_prefix + "\n\n" + base_system2) if self.persona.active else base_system2
-                response = self.llm.chat(
-                    prompt=text,
-                    system=system_prompt2,
-                    task=task,
-                )
-                if response and not self._is_uncertain(response):
-                    return response
-                log.info("Stage 2: LLM uncertain, escalating to research...")
+                from core.config import cfg as _cfg
+                use_router = bool(_cfg.get("llm.tiered_routing", False)) and bool(getattr(self, "router", None))
+            except Exception:
+                use_router = False
+
+            try:
+                if use_router:
+                    log.info("Stage 2: Tiered router (domain=%s)", domain)
+                    result = self.router.route(text, system=system_prompt2)
+                    response = result.text
+                    if response and not self._is_uncertain(response):
+                        if result.tier_used is not None and result.tier_used.name == "CLOUD":
+                            self.context.set_last_output(response, "cloud")
+                        return response
+                    log.info("Stage 2: router uncertain, escalating to research...")
+                else:
+                    log.info(f"Stage 2: Domain-aware LLM (domain={domain}, task={task})")
+                    response = self.llm.chat(
+                        prompt=text,
+                        system=system_prompt2,
+                        task=task,
+                    )
+                    if response and not self._is_uncertain(response):
+                        return response
+                    log.info("Stage 2: LLM uncertain, escalating to research...")
             except Exception as e:
                 log.warning(f"Stage 2 failed: {e}")
 
@@ -926,6 +1129,90 @@ class Brain:
     # ─────────────────────────────────────────────
     # Automation engine interface
     # ─────────────────────────────────────────────
+
+    def _get_model_manager(self):
+        """Lazy-load and return the ModelManager (or None if unavailable)."""
+        mgr = getattr(self, "_model_manager", None)
+        if mgr is None:
+            try:
+                from core.model_manager import get_model_manager
+                mgr = get_model_manager()
+            except Exception as e:
+                log.warning("ModelManager unavailable: %s", e)
+                mgr = False
+            self._model_manager = mgr
+        return mgr if mgr else None
+
+    def ask_tiered(self, text: str, system: str | None = None, confirm=None):
+        """Answer a question through the tiered router (reflex→local→cloud).
+        Returns a RouteResult, or None if the router isn't available."""
+        if not getattr(self, "router", None):
+            return None
+        return self.router.route(text, system=system, confirm=confirm)
+
+    def deep_research(self, question: str, on_progress=None):
+        """Run the autonomous web-research agent (search→read→refine→answer).
+        Returns a ResearchResult, or None if the agent isn't available."""
+        if not getattr(self, "web_agent", None):
+            return None
+        return self.web_agent.research(question, on_progress=on_progress)
+
+    # ── Perception ────────────────────────────────────────────────────
+    @staticmethod
+    def capture_camera_frame(save_path: str | None = None):
+        """Grab one webcam frame → returns an image path, or None if no camera.
+        Requires opencv (cv2); degrades gracefully when unavailable."""
+        try:
+            import cv2  # type: ignore
+        except Exception:
+            log.info("Camera capture needs opencv-python (cv2).")
+            return None
+        cap = cv2.VideoCapture(0)
+        try:
+            ok, frame = cap.read()
+            if not ok:
+                return None
+            import tempfile
+            path = save_path or tempfile.mktemp(suffix=".jpg")
+            cv2.imwrite(path, frame)
+            return path
+        finally:
+            cap.release()
+
+    def describe_scene(self, image=None, confirm=None):
+        """Describe a camera frame or an image file via the vision model."""
+        if not getattr(self, "scene_describer", None):
+            return None
+        if image is None:
+            image = self.capture_camera_frame()
+            if image is None:
+                from vision.scene_describer import SceneResult
+                return SceneResult(False, "No camera available. Pass an image path "
+                                          "(e.g. `look photo.jpg`).")
+        return self.scene_describer.describe(image, confirm=confirm)
+
+    def where_am_i(self, image=None):
+        """Identify the current place from a camera frame or image file."""
+        if not getattr(self, "place_recognizer", None):
+            return None
+        if image is None:
+            image = self.capture_camera_frame()
+            if image is None:
+                return None
+        return self.place_recognizer.identify(image)
+
+    def enroll_place(self, name: str, frames: list):
+        """Enroll a place from image files (or captured frames)."""
+        if not getattr(self, "place_recognizer", None):
+            return 0
+        return self.place_recognizer.enroll(name, frames)
+
+    def _proactive(self, message: str) -> None:
+        """Deliver a proactive message from the fusion loop to the user."""
+        try:
+            print(f"\n\033[96m[NEXUS]\033[0m {message}")
+        except Exception:
+            log.info("PROACTIVE: %s", message)
 
     def _get_automation(self):
         """Lazy-load and return the Automation instance."""
@@ -1179,3 +1466,85 @@ class Brain:
         self.action_ext.mark_done(action_id)
         self.session_mgr.complete_action(action_id)
         return f"Action #{action_id} marked as done."
+
+    # ── Prediction Engine Command Handlers ──────────────────────────────
+
+    def _handle_prediction_commands(self, text: str) -> str:
+        """Handle prediction-related commands"""
+        t_lower = text.lower()
+
+        try:
+            # Specific prediction commands
+            if any(phrase in t_lower for phrase in ["prediction performance", "prediction stats", "prediction summary"]):
+                return self.prediction_engine.get_prediction_summary()
+
+            elif any(phrase in t_lower for phrase in ["predict crypto", "crypto prediction"]):
+                # Extract crypto symbol
+                import re
+                crypto_match = re.search(r"(bitcoin|btc|ethereum|eth|dogecoin|doge|cardano|ada|solana|sol|polkadot|dot|chainlink|link)", t_lower)
+                crypto = crypto_match.group(1) if crypto_match else "bitcoin"
+                return self.prediction_engine.predict_crypto(crypto)
+
+            elif "market analysis" in t_lower:
+                # Extract market name
+                import re
+                market_match = re.search(r"market analysis (?:for |of |on )?([a-zA-Z]+)", t_lower)
+                market = market_match.group(1) if market_match else "crypto"
+                return self.prediction_engine.get_market_analysis(market)
+
+            elif any(phrase in t_lower for phrase in ["predict", "prediction", "forecast"]):
+                # General prediction - extract the question
+                prediction_triggers = ["predict", "prediction", "forecast", "will"]
+                question = text
+                for trigger in prediction_triggers:
+                    if trigger in t_lower:
+                        # Try to extract question after trigger
+                        idx = t_lower.find(trigger)
+                        remaining = text[idx + len(trigger):].strip()
+                        if remaining and len(remaining) > 10:
+                            question = remaining
+                            break
+
+                return self.prediction_engine.predict_event(question)
+
+            else:
+                return ("Available prediction commands:\n"
+                       "• predict <question> — Make a prediction on any event\n"
+                       "• predict crypto <symbol> — Predict cryptocurrency price\n"
+                       "• market analysis <market> — Analyze market trends\n"
+                       "• prediction performance — View prediction statistics")
+
+        except Exception as e:
+            log.error("Prediction command failed: %s", e)
+            return f"Prediction analysis failed: {e}"
+
+    def _handle_market_data_commands(self, text: str) -> str:
+        """Handle market data commands"""
+        t_lower = text.lower()
+
+        try:
+            if any(phrase in t_lower for phrase in ["crypto summary", "cryptocurrency summary"]):
+                return self.market_data.get_market_summary("crypto")
+
+            elif any(phrase in t_lower for phrase in ["prediction markets", "prediction summary"]):
+                import re
+                category_match = re.search(r"prediction (?:markets|summary) (?:for |on )?([a-zA-Z]+)", t_lower)
+                category = category_match.group(1) if category_match else "crypto"
+                return self.market_data.get_prediction_summary(category)
+
+            elif "market data" in t_lower or "market summary" in t_lower:
+                # Extract market type
+                import re
+                market_match = re.search(r"market (?:data|summary) (?:for |on )?([a-zA-Z]+)", t_lower)
+                market = market_match.group(1) if market_match else "crypto"
+                return self.market_data.get_market_summary(market)
+
+            else:
+                return ("Available market data commands:\n"
+                       "• market summary — Get overall market overview\n"
+                       "• crypto summary — Get cryptocurrency market data\n"
+                       "• prediction markets — View active prediction markets")
+
+        except Exception as e:
+            log.error("Market data command failed: %s", e)
+            return f"Market data retrieval failed: {e}"

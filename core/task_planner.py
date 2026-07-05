@@ -39,6 +39,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
+from core.shell_safety import safe_run, ShellSafetyError
+
 log = logging.getLogger("nexus.task_planner")
 
 _PROCEDURE_LOG = Path(__file__).parent.parent / "data" / "task_procedures.jsonl"
@@ -398,7 +400,11 @@ class TaskPlanner:
 
         if skill == "shell":
             cmd = p.get("cmd", "echo 'no command specified'")
-            proc = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=30)
+            # LLM-generated command — validate before running.
+            try:
+                proc = safe_run(cmd, timeout=30)
+            except ShellSafetyError as exc:
+                return f"(refused unsafe command: {exc})"
             return proc.stdout.strip() or proc.stderr.strip() or "(no output)"
 
         if skill == "memory":

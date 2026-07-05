@@ -16,6 +16,7 @@ Usage:
 """
 
 import logging
+import os
 import time
 from typing import Optional, Iterator
 
@@ -32,7 +33,20 @@ MODELS = {
     "research": "qwen2.5:1.5b",       # summarization
 }
 
-OLLAMA_HOST = "http://localhost:11434"
+def _default_host() -> str:
+    """Resolve the Ollama host: env var > config file > built-in default."""
+    env = os.environ.get("NEXUS_OLLAMA_HOST")
+    if env:
+        return env
+    try:
+        from core.config import cfg
+        return cfg.get("llm.host", "http://localhost:11434")
+    except Exception:
+        return "http://localhost:11434"
+
+
+# Kept for backward-compatibility with any code importing this name.
+OLLAMA_HOST = _default_host()
 
 
 # ─────────────────────────────────────────────
@@ -47,8 +61,8 @@ class LLM:
     Falls back gracefully if Ollama isn't running.
     """
 
-    def __init__(self, host: str = OLLAMA_HOST):
-        self.host    = host
+    def __init__(self, host: str | None = None):
+        self.host    = host or _default_host()
         self._client = None
         self._available_models: list[str] = []
         self._ready  = False
@@ -268,6 +282,37 @@ class LLM:
         else:
             prompt = question
         return self.chat(prompt, options={"num_predict": max_tokens})
+
+    def describe_image(
+        self,
+        image,
+        prompt: str = "Describe what you see in this image concisely.",
+        model: Optional[str] = None,
+    ) -> str:
+        """
+        Run a vision-language model (e.g. moondream / llava) on an image.
+
+        image : a file path (str/Path) or raw image bytes.
+        model : the VLM to use; defaults to whatever the caller passes or a
+                sensible vision model. The model must already be pulled in
+                Ollama (use the model manager to download it).
+        """
+        if not self._ready:
+            return self._offline_fallback(prompt)
+
+        # Ollama accepts image file paths or bytes in the `images` field.
+        try:
+            from pathlib import Path as _Path
+            img = str(image) if isinstance(image, (str, _Path)) else image
+            vlm = model or "llava"
+            response = self._client.chat(
+                model=vlm,
+                messages=[{"role": "user", "content": prompt, "images": [img]}],
+            )
+            return response.message.content.strip()
+        except Exception as e:
+            log.error(f"describe_image failed: {e}")
+            return f"LLM error: {e}"
 
     def classify_intent(self, text: str) -> dict:
         """

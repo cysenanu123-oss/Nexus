@@ -41,6 +41,8 @@ from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Optional, Any
 
+from core.shell_safety import safe_run, ShellSafetyError
+
 log = logging.getLogger("nexus.skills")
 
 SKILLS_DIR = Path("data/skills")
@@ -356,9 +358,17 @@ class SkillManager:
         for key, val in kwargs.items():
             cmd = cmd.replace(f"{{{key}}}", str(val))
 
-        result = subprocess.run(
-            cmd, shell=True, capture_output=True, text=True, timeout=30
-        )
+        # Bash skills may use pipes/redirects, but destructive commands
+        # (rm -rf /, mkfs, dd, curl | sh, ...) are refused.
+        try:
+            result = safe_run(cmd, timeout=30, allow_shell_operators=True)
+        except ShellSafetyError as exc:
+            return SkillResult(
+                skill_name=skill.name,
+                success=False,
+                output="",
+                error=f"refused by safety layer: {exc}",
+            )
         output = (result.stdout or result.stderr or "").strip()
         return SkillResult(
             skill_name=skill.name,
