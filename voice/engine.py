@@ -205,7 +205,14 @@ class VoiceEngine:
             time.sleep(0.2)
 
             # ── 2. RECORD USER SPEECH ─────────────────────────
-            audio = self.listener.capture_phrase(verbose=False)
+            # Show a cue during a thinking pause so it's clear NEXUS is still
+            # capturing (waiting for you to continue), not processing yet.
+            def _capture_cue(kind: str):
+                if kind == "pausing":
+                    print("\033[2m[NEXUS] …still listening (take your time)\033[0m",
+                          flush=True)
+
+            audio = self.listener.capture_phrase(verbose=False, on_status=_capture_cue)
 
             if audio is None or len(audio) == 0:
                 print("[NEXUS] No speech captured.")
