@@ -62,6 +62,11 @@
 * **Awareness / fusion loop** — `core/fusion_loop.py` + `core/world_state.py`:
   fuses sensors into a live world-state and speaks up proactively (rate-limited).
   `awareness` command. Covered by `tests/test_fusion_loop.py`.
+* **Prompt-engineer pre-stage** — `core/prompt_engineer.py`: a router pre-stage
+  that builds a domain-appropriate system prompt (role/constraints/format) and,
+  opt-in, rewrites the user's prompt for the target model — always preserving the
+  original, gated to complex tasks. Behind `llm.prompt_engineering` /
+  `llm.prompt_rewrite`. Covered by `tests/test_prompt_engineer.py`.
 
 ### Known limitations / next hardening steps
 

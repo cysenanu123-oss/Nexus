@@ -218,10 +218,19 @@ class Brain:
             from core.config import cfg
             backends = build_default_backends(
                 self.llm, model_manager=self._get_model_manager(), cfg=cfg)
+            # Optional prompt-engineer pre-stage (off by default).
+            prompt_eng = None
+            if cfg.get("llm.prompt_engineering", False):
+                from core.prompt_engineer import PromptEngineer
+                prompt_eng = PromptEngineer(
+                    llm=self.llm,
+                    allow_rewrite=bool(cfg.get("llm.prompt_rewrite", False)),
+                )
             self.router = BrainRouter(
                 backends,
                 allow_cloud=bool(cfg.get("llm.allow_cloud", False)),
                 cloud_confirm=bool(cfg.get("llm.cloud_confirm", True)),
+                prompt_engineer=prompt_eng,
             )
             log.info("BrainRouter ready — %d backend(s).", len(self.router.backends))
         except Exception as e:

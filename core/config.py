@@ -79,6 +79,10 @@ SCHEMA: dict[str, dict] = {
     # tiered brain router — cloud escalation (privacy-first: off by default)
     "llm.tiered_routing":            {"type": bool,  "default": False},
     "llm.allow_cloud":               {"type": bool,  "default": False},
+    # prompt-engineer pre-stage (constructs better system prompts; rewrite is
+    # the more aggressive opt-in that lets the model reword the user's prompt)
+    "llm.prompt_engineering":        {"type": bool,  "default": False},
+    "llm.prompt_rewrite":            {"type": bool,  "default": False},
     "llm.cloud_confirm":             {"type": bool,  "default": True},
     "llm.cloud_provider":            {"type": str,   "default": "anthropic",
                                       "choices": ["anthropic", "openai"]},

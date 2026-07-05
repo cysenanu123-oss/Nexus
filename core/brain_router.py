@@ -241,6 +241,7 @@ class BrainRouter:
         allow_cloud: bool = False,
         cloud_confirm: bool = True,
         uncertain_fn: Callable[[str], bool] = is_uncertain,
+        prompt_engineer=None,
     ):
         # Lowest tier first; dedupe identical local models so we don't ask the
         # same model twice on a device where reflex and local resolve equal.
@@ -248,6 +249,8 @@ class BrainRouter:
         self.allow_cloud = allow_cloud
         self.cloud_confirm = cloud_confirm
         self.is_uncertain = uncertain_fn
+        # Optional pre-stage: engineers a better (system, prompt) per backend.
+        self.prompt_engineer = prompt_engineer
 
     @staticmethod
     def _dedupe(backends: list[Backend]) -> list[Backend]:
@@ -291,8 +294,19 @@ class BrainRouter:
             if backend.tier == Tier.CLOUD and not self._cloud_ok(confirm, backend):
                 continue
 
+            # Prompt-engineer stage: build a better (system, prompt) for this
+            # backend. Falls back to the raw task/system on any error.
+            gen_prompt, gen_system = task, system
+            if self.prompt_engineer is not None:
+                try:
+                    ep = self.prompt_engineer.engineer(
+                        task, base_system=system, tier=backend.tier.name)
+                    gen_prompt, gen_system = ep.prompt, ep.system
+                except Exception as e:
+                    log.warning("Prompt engineer failed, using raw task: %s", e)
+
             tried.append(backend.name)
-            text = backend.generate(task, system=system)
+            text = backend.generate(gen_prompt, system=gen_system)
             last_text, last_tier, last_name = text, backend.tier, backend.name
 
             if text and not self.is_uncertain(text):
