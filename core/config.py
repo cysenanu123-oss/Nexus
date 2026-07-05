@@ -53,7 +53,10 @@ SCHEMA: dict[str, dict] = {
     "voice.noise_reduction":         {"type": bool,  "default": True},
     "voice.wake_word_sensitivity":   {"type": float, "default": 0.7,   "min": 0.0, "max": 1.0},
     "voice.silence_timeout_sec":     {"type": float, "default": 2.0,   "min": 0.5, "max": 10.0},
-    "voice.max_listen_sec":          {"type": int,   "default": 15,    "min": 3,   "max": 120},
+    # end-of-turn silence: how long you go quiet before a turn is considered
+    # finished. Higher = more tolerant of thinking pauses mid-sentence.
+    "voice.end_silence_ms":          {"type": int,   "default": 1200,  "min": 300, "max": 5000},
+    "voice.max_listen_sec":          {"type": int,   "default": 30,    "min": 3,   "max": 120},
 
     # speaker_id
     "speaker_id.enabled":            {"type": bool,  "default": False},

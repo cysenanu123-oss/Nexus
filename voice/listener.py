@@ -66,7 +66,10 @@ CHUNK_MS        = 400
 VAD_ENERGY_THRESHOLD  = 0.02   # RMS threshold — tuned for ALC257 ambient noise
 VAD_SPEECH_PAD_MS     = 300    # ms of silence to keep after speech ends
 VAD_MIN_SPEECH_MS     = 200    # ignore bursts shorter than this
-VAD_MAX_PHRASE_SEC    = 15     # hard cut — max length of one captured phrase
+VAD_END_SILENCE_MS    = 1200   # end-of-turn: how long you must go quiet to finish
+                               # a turn. Long enough to survive a thinking pause,
+                               # so "speaking… thinking… speaking" stays one turn.
+VAD_MAX_PHRASE_SEC    = 30     # hard cut — max length of one captured phrase
 
 # Noise gate / high-pass filter
 HIGHPASS_CUTOFF_HZ = 80        # filter out low-freq rumble (AC, fans)
@@ -170,6 +173,7 @@ class MicrophoneListener:
         vad_threshold: float = VAD_ENERGY_THRESHOLD,
         vad_pad_ms: int = VAD_SPEECH_PAD_MS,
         vad_min_ms: int = VAD_MIN_SPEECH_MS,
+        end_silence_ms: int = VAD_END_SILENCE_MS,
         max_phrase_sec: float = VAD_MAX_PHRASE_SEC,
         noise_filter: bool = True,
     ):
@@ -179,8 +183,17 @@ class MicrophoneListener:
         self.vad_threshold  = vad_threshold
         self.vad_pad_ms     = vad_pad_ms
         self.vad_min_ms     = vad_min_ms
+        self.end_silence_ms = end_silence_ms
         self.max_phrase_sec = max_phrase_sec
         self.noise_filter   = noise_filter
+
+        # Let settings.json tune endpointing without editing code.
+        try:
+            from core.config import cfg
+            self.end_silence_ms = int(cfg.get("voice.end_silence_ms", end_silence_ms))
+            self.max_phrase_sec = float(cfg.get("voice.max_listen_sec", max_phrase_sec))
+        except Exception:
+            pass
 
         # Resolved at .start() — set to the device's actual hardware rate
         self._capture_rate: int = sample_rate
@@ -368,28 +381,36 @@ class MicrophoneListener:
         if verbose:
             print("\033[92m[listener] Speech detected — recording...\033[0m", flush=True)
 
-        # ── Phase 2: collect speech until silence ──────────────
-        phrase_chunks: list[np.ndarray] = list(pre_buffer)
-        silence_count = 0
-        total_chunks  = len(phrase_chunks)
+        # ── Phase 2: collect speech until end-of-turn silence ──────────────
+        # Uses the Endpointer so short thinking pauses do NOT end the turn —
+        # only a sustained end_silence_ms gap does.
+        from voice.endpointing import Endpointer, ms_to_chunks
+        end_silence_chunks = ms_to_chunks(self.end_silence_ms, self._capture_rate, frames_per_chunk)
+        endpointer = Endpointer(
+            end_silence_chunks=end_silence_chunks,
+            min_speech_chunks=min_chunks,
+            max_chunks=max_chunks,
+        )
 
-        while self._running and total_chunks < max_chunks:
+        phrase_chunks: list[np.ndarray] = list(pre_buffer)
+        # The chunk that tripped onset detection was speech — seed that.
+        endpointer.update(True)
+
+        while self._running:
             chunk = self.read_chunk(timeout=0.5)
             if chunk is None:
                 continue
 
             phrase_chunks.append(chunk)
-            total_chunks += 1
+            status = endpointer.update(self.is_speech(chunk))
+            if status == Endpointer.DONE:
+                break
+            if status == Endpointer.TOO_LONG:
+                if verbose:
+                    print("\033[33m[listener] Max phrase length reached — cutting.\033[0m")
+                break
 
-            if self.is_speech(chunk):
-                silence_count = 0
-            else:
-                silence_count += 1
-                if silence_count >= pad_chunks:
-                    break   # enough silence — phrase is done
-
-        if total_chunks >= max_chunks and verbose:
-            print("\033[33m[listener] Max phrase length reached — cutting.\033[0m")
+        total_chunks = len(phrase_chunks)
 
         # ── Phase 3: validate minimum length ──────────────────
         if len(phrase_chunks) < min_chunks:
