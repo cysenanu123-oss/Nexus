@@ -973,9 +973,7 @@ def prompt_string() -> str:
 #  MAIN REPL LOOP
 # ─────────────────────────────────────────────────────────────
 
-from voice.engine import VoiceEngine
 from core.brain import Brain
-from voice.tts import Speaker
 
 def main():
     setup_logging()
@@ -988,10 +986,20 @@ def main():
     session_history: list[str] = []
 
     brain    = Brain(user_name="Senanu")
-    speaker  = Speaker()
+
+    # ── Voice is OPTIONAL — its deps (onnxruntime, sounddevice, whisper) may
+    #    be missing or fail to load (e.g. a bad DLL on Windows). Import lazily
+    #    and degrade to text-only rather than taking down the whole CLI. ──
+    speaker = None
+    try:
+        from voice.tts import Speaker
+        speaker = Speaker()
+    except Exception as e:
+        Printer.warn(f"Text-to-speech unavailable ({e}) — text output only.")
 
     voice_engine = None
     try:
+        from voice.engine import VoiceEngine
         voice_engine = VoiceEngine(
             command_callback=lambda text:
                 parse_and_dispatch(text, session_history, voice_engine, brain=brain, speaker=speaker, is_voice=True)
