@@ -311,6 +311,7 @@ HELP_TEXT = f"""
   {Color.BRIGHT_MAGENTA}look [image]{Color.RESET}           Describe the camera view / an image (vision model)
   {Color.BRIGHT_MAGENTA}place where [image]{Color.RESET}    Recognize the current place
   {Color.BRIGHT_MAGENTA}place enroll <name> <imgs>{Color.RESET}  Teach NEXUS a place from photos
+  {Color.BRIGHT_MAGENTA}awareness [start|stop]{Color.RESET} Live world-state + proactive alerts (fusion loop)
 
   {Color.DIM}Natural language equivalents (just say them):{Color.RESET}
   {Color.BRIGHT_MAGENTA}acquire skill from https://github.com/...{Color.RESET}
@@ -829,6 +830,39 @@ def cmd_place(args: list[str], brain=None):
     Printer.error("Usage: place [where <img>|enroll <name> <imgs>|list|forget <name>]")
 
 
+def cmd_awareness(args: list[str], brain=None):
+    """Show or control the always-on fusion loop (live world-state + proactivity)."""
+    if not brain or not getattr(brain, "fusion", None):
+        Printer.warn("Fusion loop not available.")
+        return
+    fusion = brain.fusion
+    sub = args[0].lower() if args else "status"
+
+    if sub == "start":
+        fusion.start()
+        Printer.nexus(f"Awareness on — fusing {len(fusion.sensors)} sensor(s). "
+                      "I'll speak up when something changes.")
+        return
+    if sub == "stop":
+        fusion.stop()
+        Printer.nexus("Awareness off.")
+        return
+    if sub == "tick":
+        # One manual fusion step — useful without a live camera/thread.
+        msgs = fusion.tick()
+        for m in msgs:
+            Printer.nexus(m)
+        if not msgs:
+            Printer.info("(tick: nothing new)")
+
+    # status (default) — show the current world state.
+    Printer.blank()
+    print(fusion.state.summary())
+    Printer.info(f"loop: {'running' if fusion.running else 'stopped'} · "
+                 f"{len(fusion.sensors)} sensor(s)")
+    Printer.blank()
+
+
 # ─────────────────────────────────────────────────────────────
 #  COMMAND PARSER
 # ─────────────────────────────────────────────────────────────
@@ -879,6 +913,8 @@ def parse_and_dispatch(raw: str, history: list[str], voice_engine=None, brain=No
         "see":       lambda: cmd_look(args, brain=brain),
         "place":     lambda: cmd_place(args, brain=brain),
         "places":    lambda: cmd_place(["list"], brain=brain),
+        "awareness": lambda: cmd_awareness(args, brain=brain),
+        "worldstate":lambda: cmd_awareness(["status"], brain=brain),
         "exit":      None,
         "quit":      None,
     }

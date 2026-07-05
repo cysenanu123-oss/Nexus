@@ -59,6 +59,9 @@
   with a device-appropriate VLM, moondream→LLaVA/Llama-Vision). `look` / `place`
   commands. Covered by `tests/test_place_recognition.py` and
   `tests/test_scene_describer.py`.
+* **Awareness / fusion loop** — `core/fusion_loop.py` + `core/world_state.py`:
+  fuses sensors into a live world-state and speaks up proactively (rate-limited).
+  `awareness` command. Covered by `tests/test_fusion_loop.py`.
 
 ### Known limitations / next hardening steps
 
@@ -113,9 +116,12 @@ Build order:
    scales from moondream on a light laptop up to LLaVA/Llama-Vision on a GPU,
    chosen by the model manager and downloaded on consent). `look`, `place` CLI
    commands; `tests/test_place_recognition.py`, `tests/test_scene_describer.py`.
-5. `[NEXT]` **Always-on fusion loop + proactivity** — one background service
-   fusing audio/vision/screen into a live `WorldState`; rate-limited proactive
-   speech.
+5. `[DONE]` **Always-on fusion loop + proactivity** — `core/world_state.py` +
+   `core/fusion_loop.py`: a background service that polls sensors (place, scene,
+   …) on their own cadences into a live `WorldState`, with rate-limited,
+   de-duplicated proactive triggers ("you've moved from the office to the
+   kitchen"). `awareness` CLI command (built but off by default). Covered by
+   `tests/test_fusion_loop.py`.
 
 ---
 

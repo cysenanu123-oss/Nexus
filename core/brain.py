@@ -257,6 +257,22 @@ class Brain:
             self.place_recognizer = None
             log.warning(f"PlaceRecognizer unavailable: {e}")
 
+        # ── Always-on fusion loop + proactivity (built, not started) ───────
+        # Fuses perception/screen into a live WorldState and can speak up
+        # proactively. Left stopped by default (needs a camera; opt in with
+        # `awareness start`).
+        try:
+            from core.fusion_loop import FusionLoop, build_default_sensors
+            self.fusion = FusionLoop(
+                build_default_sensors(self),
+                on_message=self._proactive,
+            )
+            log.info("FusionLoop ready — %d sensor(s), not started.",
+                     len(self.fusion.sensors))
+        except Exception as e:
+            self.fusion = None
+            log.warning(f"FusionLoop unavailable: {e}")
+
         # ── Subsystem health ─────────────────────────────────────────────
         # Many subsystems degrade to None on import/init failure. Rather than
         # let that stay silent (and surface later as an AttributeError), record
@@ -291,6 +307,7 @@ class Brain:
         ("web_agent",         "Autonomous web-research agent"),
         ("scene_describer",   "Scene description (VLM)"),
         ("place_recognizer",  "Place recognition"),
+        ("fusion",            "Awareness / fusion loop"),
     )
 
     def _refresh_subsystem_status(self) -> None:
@@ -1180,6 +1197,13 @@ class Brain:
         if not getattr(self, "place_recognizer", None):
             return 0
         return self.place_recognizer.enroll(name, frames)
+
+    def _proactive(self, message: str) -> None:
+        """Deliver a proactive message from the fusion loop to the user."""
+        try:
+            print(f"\n\033[96m[NEXUS]\033[0m {message}")
+        except Exception:
+            log.info("PROACTIVE: %s", message)
 
     def _get_automation(self):
         """Lazy-load and return the Automation instance."""
