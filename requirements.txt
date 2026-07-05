@@ -57,6 +57,15 @@ pyperclip>=1.8              # Cross-platform clipboard copy/paste
 # ── Optional: Face Detection ──────────────────────────────────
 # pip install insightface opencv-python      # buffalo_l model (~500 MB)
 
+# ── Optional: Perception (camera place recognition + scene VLM) ──
+# pip install opencv-python                   # webcam capture (cv2) for `look` / `place where`
+# pip install open_clip_torch torch           # CLIP image embeddings for place recognition
+#   Scene description (`look`) uses an Ollama vision model (moondream / llava);
+#   download it with:  models get moondream
+
+# ── Testing ───────────────────────────────────────────────────
+pytest>=7.0                 # Test runner — run: python -m pytest tests/
+
 # ── Optional: NSFW Filter ─────────────────────────────────────
 # pip install opennsfw2
 

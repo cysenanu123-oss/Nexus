@@ -302,6 +302,16 @@ HELP_TEXT = f"""
   {Color.BRIGHT_MAGENTA}skills create <desc>{Color.RESET}   Ask LLM to write and register a new skill
   {Color.BRIGHT_MAGENTA}task <description>{Color.RESET}     Run the task planner on any arbitrary task
 
+  {Color.BRIGHT_MAGENTA}models{Color.RESET}                 Show device capability + which models fit / are installed
+  {Color.BRIGHT_MAGENTA}models recommend <task>{Color.RESET}  Best chat/code/reasoning/vision model for this device
+  {Color.BRIGHT_MAGENTA}models get <name>{Color.RESET}      Download a model (asks for confirmation first)
+  {Color.BRIGHT_MAGENTA}ask <question>{Color.RESET}         Answer via tiered router (reflex → local → cloud)
+  {Color.BRIGHT_MAGENTA}router{Color.RESET}                 Show router backends + cloud policy
+  {Color.BRIGHT_MAGENTA}research <question>{Color.RESET}    Autonomous web research → cited answer
+  {Color.BRIGHT_MAGENTA}look [image]{Color.RESET}           Describe the camera view / an image (vision model)
+  {Color.BRIGHT_MAGENTA}place where [image]{Color.RESET}    Recognize the current place
+  {Color.BRIGHT_MAGENTA}place enroll <name> <imgs>{Color.RESET}  Teach NEXUS a place from photos
+
   {Color.DIM}Natural language equivalents (just say them):{Color.RESET}
   {Color.BRIGHT_MAGENTA}acquire skill from https://github.com/...{Color.RESET}
   {Color.BRIGHT_MAGENTA}create a skill to send emails via Gmail{Color.RESET}
@@ -354,7 +364,7 @@ def cmd_help():
     print(HELP_TEXT)
 
 
-def cmd_status():
+def cmd_status(brain=None):
     Printer.blank()
     Printer.system("NEXUS System Status")
     Printer.divider()
@@ -364,6 +374,10 @@ def cmd_status():
     Printer.info(f"Python   : {platform.python_version()}")
     Printer.info(f"Platform : {platform.system()} {platform.release()} ({platform.machine()})")
     Printer.info(f"CWD      : {os.getcwd()}")
+    # Live subsystem health (reflects what actually initialized, not a static list)
+    if brain is not None and hasattr(brain, "status_report"):
+        Printer.blank()
+        print(brain.status_report())
     Printer.blank()
 
 
@@ -630,6 +644,191 @@ def cmd_history(history: list[str]):
     Printer.blank()
 
 
+def cmd_models(args: list[str]):
+    """Inspect device capability and manage local models (consent-based)."""
+    try:
+        from core.model_manager import get_model_manager
+    except Exception as e:
+        Printer.error(f"Model manager unavailable: {e}")
+        return
+
+    mgr = get_model_manager()
+    sub = args[0].lower() if args else "list"
+
+    if sub in ("list", "status"):
+        Printer.blank()
+        print(mgr.report())
+        Printer.blank()
+        Printer.info("Try: models get <name> · models recommend <chat|code|reasoning|vision>")
+        return
+
+    if sub == "available":
+        Printer.blank()
+        for s in mgr.available_for_device():
+            print(f"  {s.name:<18} {s.size_gb:>4}GB  [{'/'.join(s.tags)}] — {s.description}")
+        Printer.blank()
+        return
+
+    if sub == "recommend":
+        task = args[1] if len(args) > 1 else "reasoning"
+        rec = mgr.recommend(task)
+        if not rec:
+            Printer.warn(f"No '{task}' model fits this device. Try a smaller task or upgrade hardware.")
+            return
+        status = "installed" if mgr.is_installed(rec.name) else "available to download"
+        Printer.nexus(f"Best '{task}' model for this device: {rec.name} "
+                      f"(~{rec.size_gb} GB) — {status}.")
+        return
+
+    if sub == "get":
+        if len(args) < 2:
+            Printer.error("Usage: models get <name>")
+            return
+        name = args[1]
+
+        def _confirm(msg: str) -> bool:
+            try:
+                return input(f"  {msg} [y/N] ").strip().lower() in ("y", "yes")
+            except (EOFError, KeyboardInterrupt):
+                return False
+
+        Printer.info(f"Preparing to install {name}…")
+        res = mgr.ensure(name, confirm=_confirm,
+                         on_progress=lambda line: print(f"    {line}", end="\r"))
+        print()
+        (Printer.nexus if res.ok else Printer.warn)(res.message)
+        return
+
+    Printer.error("Usage: models [list|available|recommend <task>|get <name>]")
+
+
+def cmd_router(brain=None):
+    """Show the tiered brain router's backends and cloud policy."""
+    if not brain or not getattr(brain, "router", None):
+        Printer.warn("Brain router not available (is the brain loaded?).")
+        return
+    Printer.blank()
+    print(brain.router.describe())
+    Printer.blank()
+
+
+def cmd_ask(args: list[str], brain=None):
+    """Answer a question through the tiered router (reflex → local → cloud)."""
+    if not args:
+        Printer.error("Usage: ask <question>")
+        return
+    if not brain or not getattr(brain, "router", None):
+        Printer.warn("Brain router not available.")
+        return
+    question = " ".join(args)
+
+    def _confirm(msg: str) -> bool:
+        try:
+            return input(f"  {msg} [y/N] ").strip().lower() in ("y", "yes")
+        except (EOFError, KeyboardInterrupt):
+            return False
+
+    res = brain.ask_tiered(question, confirm=_confirm)
+    Printer.blank()
+    Printer.nexus(res.text)
+    if res.tier_used is not None:
+        note = f"answered by {res.backend_name}"
+        if res.escalated:
+            note += f" (escalated through {' → '.join(res.tiers_tried)})"
+        Printer.info(note)
+
+
+def cmd_research(args: list[str], brain=None):
+    """Autonomous web research: search → read → refine → cited answer."""
+    if not args:
+        Printer.error("Usage: research <question>")
+        return
+    if not brain or not getattr(brain, "web_agent", None):
+        Printer.warn("Web-research agent not available "
+                     "(needs the research modules + internet).")
+        return
+    question = " ".join(args)
+    Printer.info("Researching the web…")
+    res = brain.deep_research(
+        question, on_progress=lambda msg: print(f"    {Color.DIM}{msg}{Color.RESET}"))
+    Printer.blank()
+    Printer.nexus(res.answer)
+    if res.sources:
+        Printer.blank()
+        print(f"  {Color.DIM}Sources ({len(res.sources)}) · "
+              f"{res.iterations} search round(s):{Color.RESET}")
+        for i, s in enumerate(res.sources, 1):
+            print(f"    [{i}] {s.title or s.url}\n        {Color.DIM}{s.url}{Color.RESET}")
+
+
+def cmd_look(args: list[str], brain=None):
+    """Describe the camera view (or an image file) via the vision model."""
+    if not brain or not getattr(brain, "scene_describer", None):
+        Printer.warn("Scene description not available.")
+        return
+    image = args[0] if args else None
+
+    def _confirm(msg: str) -> bool:
+        try:
+            return input(f"  {msg} [y/N] ").strip().lower() in ("y", "yes")
+        except (EOFError, KeyboardInterrupt):
+            return False
+
+    Printer.info("Looking…")
+    res = brain.describe_scene(image, confirm=_confirm)
+    Printer.blank()
+    (Printer.nexus if res.ok else Printer.warn)(res.text)
+    if res.ok and res.model:
+        Printer.info(f"(via {res.model})")
+
+
+def cmd_place(args: list[str], brain=None):
+    """Place recognition: enroll / list / forget / identify the current place."""
+    if not brain or not getattr(brain, "place_recognizer", None):
+        Printer.warn("Place recognition not available.")
+        return
+    sub = args[0].lower() if args else "where"
+    pr = brain.place_recognizer
+
+    if sub in ("list", "places"):
+        names = pr.store.names()
+        Printer.nexus("Enrolled places: " + (", ".join(names) if names else "none yet"))
+        return
+
+    if sub == "enroll":
+        if len(args) < 3:
+            Printer.error("Usage: place enroll <name> <image1> [image2 ...]")
+            return
+        name, images = args[1], args[2:]
+        try:
+            n = brain.enroll_place(name, images)
+            Printer.nexus(f"Enrolled '{name}' from {n} image(s).")
+        except Exception as e:
+            Printer.error(f"Enrollment failed: {e}")
+        return
+
+    if sub == "forget":
+        if len(args) < 2:
+            Printer.error("Usage: place forget <name>")
+            return
+        Printer.nexus("Removed." if pr.store.remove(args[1]) else "No such place.")
+        return
+
+    if sub == "where":
+        image = args[1] if len(args) > 1 else None
+        res = brain.where_am_i(image)
+        if res is None:
+            Printer.warn("No camera and no image given. Try: place where <image>")
+        elif res.known:
+            Printer.nexus(f"You're in the {res.place} (confidence {res.score:.2f}).")
+        else:
+            Printer.nexus("I don't recognize this place. Enroll it: "
+                          "place enroll <name> <image>")
+        return
+
+    Printer.error("Usage: place [where <img>|enroll <name> <imgs>|list|forget <name>]")
+
+
 # ─────────────────────────────────────────────────────────────
 #  COMMAND PARSER
 # ─────────────────────────────────────────────────────────────
@@ -653,7 +852,7 @@ def parse_and_dispatch(raw: str, history: list[str], voice_engine=None, brain=No
     dispatch = {
         "help":      lambda: cmd_help(),
         "?":         lambda: cmd_help(),
-        "status":    lambda: cmd_status(),
+        "status":    lambda: cmd_status(brain=brain),
         "version":   lambda: cmd_version(),
         "sysinfo":   lambda: cmd_sysinfo(),
         "modules":   lambda: cmd_modules(),
@@ -670,6 +869,16 @@ def parse_and_dispatch(raw: str, history: list[str], voice_engine=None, brain=No
         "skills":    lambda: cmd_skills(args, brain=brain),
         "skill":     lambda: cmd_skills(args, brain=brain),
         "task":      lambda: cmd_task(args, brain=brain),
+        "models":    lambda: cmd_models(args),
+        "model":     lambda: cmd_models(args),
+        "router":    lambda: cmd_router(brain=brain),
+        "ask":       lambda: cmd_ask(args, brain=brain),
+        "research":  lambda: cmd_research(args, brain=brain),
+        "websearch": lambda: cmd_research(args, brain=brain),
+        "look":      lambda: cmd_look(args, brain=brain),
+        "see":       lambda: cmd_look(args, brain=brain),
+        "place":     lambda: cmd_place(args, brain=brain),
+        "places":    lambda: cmd_place(["list"], brain=brain),
         "exit":      None,
         "quit":      None,
     }

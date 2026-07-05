@@ -33,3 +33,6 @@ Thumbs.db
 # IDE
 .vscode/settings.json
 .idea/
+
+# Actual virtualenv name used in this repo
+nexus_venv/

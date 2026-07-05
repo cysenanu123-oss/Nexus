@@ -1,135 +1,136 @@
 {
-    "_meta": {
-        "version": "0.1.0",
-        "phase": "Phase 1 — Foundation",
-        "last_updated": "2026-05-09",
-        "description": "NEXUS master configuration file. Edit values here to control all system behaviour."
-    },
-    "identity": {
-        "assistant_name": "NEXUS",
-        "owner_name": "User",
-        "wake_word": "hey nexus",
-        "version": "0.1.0-alpha",
-        "personality": "precise"
-    },
-    "system": {
-        "debug_mode": true,
-        "log_level": "INFO",
-        "log_to_file": true,
-        "log_max_size_mb": 10,
-        "log_backup_count": 5,
-        "startup_animation": true,
-        "clear_on_start": true,
-        "command_history_limit": 500
-    },
-    "voice": {
-        "enabled": false,
-        "engine": "faster-whisper",
-        "model_size": "base",
-        "language": "en",
-        "sample_rate": 16000,
-        "microphone_index": null,
-        "noise_reduction": true,
-        "wake_word_sensitivity": 0.7,
-        "silence_timeout_sec": 2.0,
-        "max_listen_sec": 15
-    },
-    "speaker_id": {
-        "enabled": false,
-        "engine": "speechbrain",
-        "confidence_threshold": 0.85,
-        "unknown_speaker_action": "warn",
-        "profiles_dir": "data/speaker_profiles"
-    },
-    "vision": {
-        "enabled": false,
-        "screen_capture": false,
-        "ocr_engine": "tesseract",
-        "capture_interval_sec": 2.0,
-        "monitor_index": 0,
-        "save_screenshots": false,
-        "screenshots_dir": "data/screenshots"
-    },
-    "llm": {
-        "provider": "ollama",
-        "model": "mistral",
-        "fallback_model": "phi3",
-        "temperature": 0.7,
-        "max_tokens": 2048,
-        "context_window": 4096,
-        "stream_responses": true,
-        "ollama_host": "http://localhost:11434",
-        "api_timeout_sec": 60
-    },
-    "memory": {
-        "enabled": false,
-        "short_term_limit": 50,
-        "long_term_backend": "sqlite",
-        "db_path": "data/memory/nexus_memory.db",
-        "vector_store": "chromadb",
-        "vector_store_path": "data/memory/vectors",
-        "auto_summarize": true,
-        "summarize_after_turns": 20
-    },
-    "cybersecurity": {
-        "enabled": false,
-        "network_monitoring": false,
-        "log_analysis": false,
-        "threat_detection": false,
-        "scan_interval_sec": 60,
-        "alert_on_anomaly": true
-    },
-    "coding_assistant": {
-        "enabled": false,
-        "git_integration": true,
-        "auto_docs": false,
-        "language_support": [
-            "python",
-            "bash",
-            "javascript",
-            "c",
-            "rust"
-        ],
-        "workspace_dir": "."
-    },
-    "security": {
-        "voice_auth_required": false,
-        "encrypted_storage": false,
-        "restrict_shell_commands": true,
-        "shell_command_allowlist": [],
-        "activity_logging": true,
-        "sandbox_enabled": false
-    },
-    "interface": {
-        "terminal_theme": "dark",
-        "color_output": true,
-        "show_timestamps": true,
-        "prompt_style": "full",
-        "banner_on_start": true,
-        "typing_effect": false,
-        "typing_speed_wpm": 120
-    },
-    "paths": {
-        "root": ".",
-        "core": "core",
-        "voice": "voice",
-        "vision": "vision",
-        "models": "models",
-        "memory": "memory",
-        "cyber": "cyber",
-        "automation": "automation",
-        "interface": "interface",
-        "plugins": "plugins",
-        "logs": "logs",
-        "data": "data",
-        "config": "config",
-        "tests": "tests",
-        "docs": "docs"
-    },
-    "plugins": {
-        "enabled": true,
-        "auto_load": true,
-        "plugins_dir": "plugins",
-        "safe_mode": true
-    }
+  "_meta": {
+    "version": "0.1.0",
+    "phase": "Phase 1 — Foundation",
+    "last_updated": "2026-07-04",
+    "description": "NEXUS master configuration file. Edit values here to control all system behaviour."
+  },
+  "identity": {
+    "assistant_name": "NEXUS",
+    "owner_name": "Cyril",
+    "wake_word": "hey nexus",
+    "version": "0.1.0-alpha",
+    "personality": "precise"
+  },
+  "system": {
+    "debug_mode": true,
+    "log_level": "INFO",
+    "log_to_file": true,
+    "log_max_size_mb": 10,
+    "log_backup_count": 5,
+    "startup_animation": true,
+    "clear_on_start": true,
+    "command_history_limit": 500
+  },
+  "voice": {
+    "enabled": false,
+    "engine": "faster-whisper",
+    "model_size": "base",
+    "language": "en",
+    "sample_rate": 16000,
+    "microphone_index": null,
+    "noise_reduction": true,
+    "wake_word_sensitivity": 0.7,
+    "silence_timeout_sec": 2.0,
+    "max_listen_sec": 15
+  },
+  "speaker_id": {
+    "enabled": false,
+    "engine": "speechbrain",
+    "confidence_threshold": 0.85,
+    "unknown_speaker_action": "warn",
+    "profiles_dir": "data/speaker_profiles"
+  },
+  "vision": {
+    "enabled": false,
+    "screen_capture": false,
+    "ocr_engine": "tesseract",
+    "capture_interval_sec": 2.0,
+    "monitor_index": 0,
+    "save_screenshots": false,
+    "screenshots_dir": "data/screenshots"
+  },
+  "llm": {
+    "provider": "ollama",
+    "model": "mistral",
+    "fallback_model": "phi3",
+    "temperature": 0.7,
+    "max_tokens": 2048,
+    "context_window": 4096,
+    "stream_responses": true,
+    "ollama_host": "http://localhost:11434",
+    "api_timeout_sec": 60,
+    "host": "http://localhost:11434"
+  },
+  "memory": {
+    "enabled": false,
+    "short_term_limit": 50,
+    "long_term_backend": "sqlite",
+    "db_path": "data/memory/nexus_memory.db",
+    "vector_store": "chromadb",
+    "vector_store_path": "data/memory/vectors",
+    "auto_summarize": true,
+    "summarize_after_turns": 20
+  },
+  "cybersecurity": {
+    "enabled": false,
+    "network_monitoring": false,
+    "log_analysis": false,
+    "threat_detection": false,
+    "scan_interval_sec": 60,
+    "alert_on_anomaly": true
+  },
+  "coding_assistant": {
+    "enabled": false,
+    "git_integration": true,
+    "auto_docs": false,
+    "language_support": [
+      "python",
+      "bash",
+      "javascript",
+      "c",
+      "rust"
+    ],
+    "workspace_dir": "."
+  },
+  "security": {
+    "voice_auth_required": false,
+    "encrypted_storage": false,
+    "restrict_shell_commands": true,
+    "shell_command_allowlist": [],
+    "activity_logging": true,
+    "sandbox_enabled": false
+  },
+  "interface": {
+    "terminal_theme": "dark",
+    "color_output": true,
+    "show_timestamps": true,
+    "prompt_style": "full",
+    "banner_on_start": true,
+    "typing_effect": false,
+    "typing_speed_wpm": 120
+  },
+  "paths": {
+    "root": ".",
+    "core": "core",
+    "voice": "voice",
+    "vision": "vision",
+    "models": "models",
+    "memory": "memory",
+    "cyber": "cyber",
+    "automation": "automation",
+    "interface": "interface",
+    "plugins": "plugins",
+    "logs": "logs",
+    "data": "data",
+    "config": "config",
+    "tests": "tests",
+    "docs": "docs"
+  },
+  "plugins": {
+    "enabled": true,
+    "auto_load": true,
+    "plugins_dir": "plugins",
+    "safe_mode": true
+  }
 }

@@ -39,6 +39,8 @@ from dataclasses import dataclass, field
 from typing import Callable, Optional, Any, Union, Dict, List
 from enum import Enum
 
+from core.shell_safety import check_command
+
 log = logging.getLogger("nexus.retry_system")
 
 
@@ -311,7 +313,17 @@ class RetryExecutor:
 
         try:
             if isinstance(attempt.command, str):
-                # Shell command execution
+                # Shell command execution — deny-list guard (pipes/redirects
+                # allowed here, but destructive commands are refused).
+                verdict = check_command(attempt.command, allow_shell_operators=True)
+                if not verdict.ok:
+                    attempt.exit_code = 126
+                    attempt.stdout = ""
+                    attempt.stderr = f"refused by safety layer: {verdict.reason}"
+                    attempt.success = False
+                    attempt.failure_type = FailureType.PERMISSION
+                    attempt.elapsed_time = time.time() - start_time
+                    return
                 result = subprocess.run(
                     attempt.command,
                     shell=True,

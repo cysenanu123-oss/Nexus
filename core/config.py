@@ -70,11 +70,19 @@ SCHEMA: dict[str, dict] = {
     # llm
     "llm.provider":                  {"type": str,   "default": "ollama",
                                       "choices": ["ollama", "anthropic", "openai", "local"]},
+    "llm.host":                      {"type": str,   "default": "http://localhost:11434"},
     "llm.model":                     {"type": str,   "default": "mistral"},
     "llm.temperature":               {"type": float, "default": 0.7,   "min": 0.0, "max": 2.0},
     "llm.max_tokens":                {"type": int,   "default": 2048,  "min": 64,  "max": 32768},
     "llm.stream_responses":          {"type": bool,  "default": True},
     "llm.api_timeout_sec":           {"type": int,   "default": 60,    "min": 5,   "max": 300},
+    # tiered brain router — cloud escalation (privacy-first: off by default)
+    "llm.tiered_routing":            {"type": bool,  "default": False},
+    "llm.allow_cloud":               {"type": bool,  "default": False},
+    "llm.cloud_confirm":             {"type": bool,  "default": True},
+    "llm.cloud_provider":            {"type": str,   "default": "anthropic",
+                                      "choices": ["anthropic", "openai"]},
+    "llm.cloud_model":               {"type": str,   "default": "claude-sonnet-5"},
 
     # memory
     "memory.enabled":                {"type": bool,  "default": False},

@@ -14,6 +14,111 @@
 
 ---
 
+# HARDENING & RELIABILITY STATUS
+
+> **Honesty rule:** `[DONE]` in the roadmap below means *the code exists and
+> imports*. It does **not** by itself mean the feature is verified end-to-end.
+> A feature is only "reliable" once it has a test in `tests/`. Prefer depth
+> (a few subsystems that are hardened and tested) over breadth (many `[DONE]`
+> boxes that have never been exercised). **Do not mark a capability reliable
+> without a test proving it.**
+
+### Verified / hardened
+
+* **Shell execution safety** — every shell call routes through
+  `core/shell_safety.py`, which refuses destructive commands (`rm -rf /`,
+  `mkfs`, `dd`, fork bombs, `curl | sh`, …) and blocks command-injection via
+  shell operators. Covered by `tests/test_shell_safety.py`. This replaced
+  several `subprocess.run(..., shell=True)` call sites that executed
+  LLM-generated commands unchecked.
+* **Command routing** — the exact-match command groups in `Brain._route` are
+  now a testable registry (`core/command_router.py`), covered by
+  `tests/test_command_router.py`.
+* **Subsystem health** — `Brain.status_report()` reports which optional
+  subsystems actually initialized instead of silently degrading to `None`.
+  Surfaced by the `status` command.
+* **Configuration** — Ollama host (`llm.host`, or `$NEXUS_OLLAMA_HOST`) and
+  owner name (`identity.owner_name`) come from `config/settings.json` /
+  `core/config.py` rather than hardcoded constants.
+* **Adaptive model management** — `core/hardware.py` detects device capability
+  (RAM/GPU/VRAM/accelerator) cross-platform, and `core/model_manager.py` keeps a
+  catalog of models, shows which fit the device, and downloads them **only with
+  the user's consent** (`models` CLI command). Covered by
+  `tests/test_hardware.py` and `tests/test_model_manager.py`.
+* **Tiered brain router** — `core/brain_router.py` routes each task to the
+  cheapest capable brain (reflex → local → cloud), escalating on uncertainty and
+  gating cloud behind explicit consent. `ask` / `router` commands, and (behind
+  `llm.tiered_routing`) the main conversation path. Covered by
+  `tests/test_brain_router.py`.
+* **Autonomous web-research agent** — `core/web_agent.py` runs a
+  search→read→refine→cite loop; `core/web_safety.py` blocks SSRF/internal-host
+  fetches and gates web *actions* behind consent. `research` command. Covered by
+  `tests/test_web_agent.py` and `tests/test_web_safety.py`.
+* **Perception** — `vision/place_recognition.py` (enroll places by photo, then
+  recognize/announce location) and `vision/scene_describer.py` (describe a frame
+  with a device-appropriate VLM, moondream→LLaVA/Llama-Vision). `look` / `place`
+  commands. Covered by `tests/test_place_recognition.py` and
+  `tests/test_scene_describer.py`.
+
+### Known limitations / next hardening steps
+
+* `Brain.__init__` still eagerly constructs many subsystems; migrate the
+  heavy ones to lazy initialization.
+* `Brain._route` still contains prefix/predicate branches that have not been
+  migrated to the router yet.
+* Broad `except Exception` handlers remain widespread; narrow them so failures
+  are visible, not swallowed.
+* Personal data (`data/*.db`, `data/*.jsonl`) is now untracked, but earlier
+  commits still contain it — rewrite history with `git filter-repo` before
+  making the repo public.
+
+### Running the tests
+
+```bash
+python -m pytest tests/ -q
+```
+
+---
+
+# ADAPTIVE INTELLIGENCE ROADMAP ("towards Jarvis")
+
+The direction: Nexus becomes a **broker of intelligence** — it knows which
+brains are available (tiny local → bigger local → cloud → other AIs + the open
+web) and routes each task to the cheapest one that can handle it, growing more
+capable as hardware and network allow.
+
+Decisions locked:
+* **Cloud AIs:** hybrid — official APIs (Anthropic/OpenAI/Google) primary,
+  real-browser automation as a fallback for services without an API.
+* **Local backend:** support both — Ollama as the default, GGUF/llama.cpp as an
+  advanced option.
+* **Downloads:** always consent-gated; never pull a model without asking.
+
+Build order:
+1. `[DONE]` **Capability detection + model manager** — `core/hardware.py`,
+   `core/model_manager.py`, `models` CLI command, tests. Foundation for the rest.
+2. `[DONE]` **Tiered brain router** — `core/brain_router.py`: reflex (local tiny)
+   → local reasoning → cloud, escalating only when the local model is uncertain.
+   Cloud is consent-gated (`llm.allow_cloud` off by default; per-call confirm).
+   `ask <question>` and `router` CLI commands; `tests/test_brain_router.py`.
+3. `[DONE]` **Autonomous web-research agent** — `core/web_agent.py`:
+   search → filter → read → summarize → assess → refine loop over the
+   `research/` modules. `core/web_safety.py` gates it: reads freely but blocks
+   internal/metadata hosts (SSRF) and non-web schemes, and requires consent for
+   any state-changing action (mirrors `core/shell_safety.py`). `research
+   <question>` CLI command; `tests/test_web_agent.py`, `tests/test_web_safety.py`.
+4. `[DONE]` **Perception** — `vision/place_recognition.py` (CLIP-embedding place
+   recognition, same enroll/verify pattern as `voice/speaker_id.py`) and
+   `vision/scene_describer.py` (scene description via a vision-language model that
+   scales from moondream on a light laptop up to LLaVA/Llama-Vision on a GPU,
+   chosen by the model manager and downloaded on consent). `look`, `place` CLI
+   commands; `tests/test_place_recognition.py`, `tests/test_scene_describer.py`.
+5. `[NEXT]` **Always-on fusion loop + proactivity** — one background service
+   fusing audio/vision/screen into a live `WorldState`; rate-limited proactive
+   speech.
+
+---
+
 # PROJECT VISION
 
 NEXUS is a modular, self-extending AI assistant designed to function as:
