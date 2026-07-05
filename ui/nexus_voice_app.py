@@ -149,6 +149,11 @@ class ParticleField(QWidget):
         self._speak_phase = 0.0   # oscillates during speaking
         self._wake_flash  = 0.0   # bright flash on wake
 
+        # Audio-reactive energy (0..1). Fed via set_amplitude() from the voice
+        # worker; when nothing is fed the sine fallback keeps it lively.
+        from core.audio_reactive import AmplitudeEnvelope
+        self._amp_env = AmplitudeEnvelope()
+
         # ── Pairwise distance cache (updated every 8 ticks) ────
         self._conn_pairs : np.ndarray = np.empty((0, 2), int)
         self._conn_alpha : np.ndarray = np.empty(0)
@@ -178,15 +183,28 @@ class ParticleField(QWidget):
         elif state == "error":
             self._target = self._idle * 0.6
 
+    def set_amplitude(self, level: float):
+        """Feed a live audio level (mic RMS while listening, TTS level while
+        speaking). Drives the sphere's pulse. Safe to call from any thread."""
+        try:
+            self._amp_env.push(float(level))
+        except Exception:
+            pass
+
     # ── Physics tick ──────────────────────────────────────────
 
     def _tick(self):
         state = self._state
 
-        # ── Speaking: oscillate explosion ──────────────────────
+        # ── Audio-reactive energy relaxes each frame (pushes jump it up) ──
+        energy = self._amp_env.decay_step()
+
+        # ── Speaking: pulse to the voice (falls back to a lively sine) ──
         if state == "speaking":
             self._speak_phase += 0.06
-            burst = 1.0 + 0.55 * abs(math.sin(self._speak_phase * 0.7))
+            sine  = 0.55 * abs(math.sin(self._speak_phase * 0.7))
+            drive = max(sine, energy)          # real audio wins when present
+            burst = 1.0 + 0.9 * drive
             self._target = self._sphere * (self._expl_mult * burst)[:, None]
 
         # ── Spring physics (vectorized) ─────────────────────────
@@ -368,6 +386,7 @@ class VoiceWorker(QThread):
     nexus_spoke   = pyqtSignal(str)
     user_spoke    = pyqtSignal(str)
     error_msg     = pyqtSignal(str)
+    amplitude     = pyqtSignal(float)   # live audio level → HUD pulse
 
     def __init__(self, demo: bool = False):
         super().__init__()
@@ -473,6 +492,13 @@ class VoiceWorker(QThread):
             if audio is None or len(audio) == 0:
                 self.state_changed.emit("idle")
                 continue
+
+            # Pulse the HUD to how the phrase was spoken (real user energy).
+            try:
+                from core.audio_reactive import rms
+                self.amplitude.emit(rms(audio))
+            except Exception:
+                pass
 
             self.state_changed.emit("processing")
             try:
@@ -700,6 +726,7 @@ class NexusApp(QMainWindow):
         self._worker.nexus_spoke.connect(self._on_nexus)
         self._worker.user_spoke.connect(self._on_user)
         self._worker.error_msg.connect(self._on_error)
+        self._worker.amplitude.connect(self._field.set_amplitude)
         self._worker.start()
 
     # ── Slots ─────────────────────────────────────────────────

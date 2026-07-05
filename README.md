@@ -88,6 +88,36 @@ python -m pytest tests/ -q
 
 ---
 
+# INSTALL & RUN
+
+One-shot installers set up the virtualenv, dependencies, optional stacks
+(HUD / vision / speaker-ID), and offer to pull a device-appropriate Ollama model:
+
+```bash
+# Linux / macOS
+./install.sh            # interactive   (--full / --minimal / --yes)
+
+# Windows (PowerShell)
+.\install.ps1           # interactive   (-Full / -Minimal / -Yes)
+```
+
+Then launch — `run.py` auto-picks the Jarvis HUD when PyQt5 + a display are
+available, otherwise the terminal interface:
+
+```bash
+python run.py           # HUD if available, else CLI
+python run.py --hud     # force the animated HUD (say "Hey Nexus")
+python run.py --cli     # force the terminal REPL
+python run.py --check   # report what's available
+```
+
+The **HUD** (`ui/nexus_voice_app.py`) is a native Qt app: a particle sphere that
+converges on wake, rotates while listening, and **pulses to the voice** while
+speaking (audio-reactive via `core/audio_reactive.py`). It listens in the
+background and reacts when you call it.
+
+---
+
 # ADAPTIVE INTELLIGENCE ROADMAP ("towards Jarvis")
 
 The direction: Nexus becomes a **broker of intelligence** — it knows which
