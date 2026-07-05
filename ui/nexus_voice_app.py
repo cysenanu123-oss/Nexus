@@ -411,38 +411,46 @@ class VoiceWorker(QThread):
         self._trigger.set()
 
     def _load(self):
-        """Load all voice modules. Runs on the worker thread, never main thread."""
+        """Load all voice modules. Runs on the worker thread, never main thread.
+        Each failure is surfaced (not swallowed) so you can see *why* voice is
+        degraded instead of getting a silent demo mode."""
+        def _fail(component: str, exc: Exception):
+            self.error_msg.emit(f"{component} unavailable: {exc}")
+
         try:
             from voice.wakeword import WakeWordDetector
             self._detector = WakeWordDetector()
-        except Exception:
+        except Exception as e:
             self.demo_mode = True
+            _fail("Wake word ('Hey Nexus')", e)
 
         try:
             from voice.listener import MicrophoneListener
             self._listener = MicrophoneListener()
-        except Exception:
-            pass
+        except Exception as e:
+            _fail("Microphone", e)
 
         try:
             from voice.speech_to_text import Transcriber
             self._transcriber = Transcriber(model_size="tiny")
-        except Exception:
-            pass
+        except Exception as e:
+            _fail("Speech-to-text (Whisper)", e)
 
         try:
             from core.llm import get_llm
             llm = get_llm()
             if llm.is_ready:
                 self._llm = llm
-        except Exception:
-            pass
+            else:
+                self.error_msg.emit("LLM offline — is Ollama running? (ollama serve)")
+        except Exception as e:
+            _fail("LLM", e)
 
         try:
             from voice.tts import Speaker
             self._speaker = Speaker()
-        except Exception:
-            pass
+        except Exception as e:
+            _fail("Text-to-speech", e)
 
     def run(self):
         # Safe: all heavy imports happen here on the background thread
@@ -484,7 +492,12 @@ class VoiceWorker(QThread):
             self.state_changed.emit("listening")
 
             if not self._listener or not self._transcriber:
-                self.nexus_spoke.emit("[Mic / STT unavailable — type below]")
+                missing = []
+                if not self._listener:    missing.append("microphone")
+                if not self._transcriber: missing.append("speech-to-text")
+                self.nexus_spoke.emit(
+                    f"Can't listen — {' and '.join(missing)} unavailable. "
+                    "Type below instead. (See the error above for why.)")
                 time.sleep(1.5)
                 self.state_changed.emit("idle")
                 continue

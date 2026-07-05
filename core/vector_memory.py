@@ -50,6 +50,21 @@ class VectorMemory:
 
             ef = embedding_functions.DefaultEmbeddingFunction()
 
+            # Chroma's default embedder is LAZY — it only loads its ONNX model
+            # (which needs onnxruntime) on the first embed. If that backend is
+            # broken (e.g. onnxruntime DLL won't load on Windows), every upsert
+            # and query fails and retries, hanging ~10s each. Health-check it
+            # ONCE here so we fail fast and cleanly fall back to keyword memory.
+            try:
+                ef(["healthcheck"])
+            except Exception as e:
+                log.warning(
+                    "VectorMemory disabled — embedding backend unavailable (%s). "
+                    "Falling back to keyword memory. To enable semantic memory, "
+                    "fix onnxruntime: `pip install --force-reinstall onnxruntime` "
+                    "and install the VC++ Redistributable.", e)
+                return
+
             self._memory_col   = self._client.get_or_create_collection(COLLECTION_MEMORY,   embedding_function=ef)
             self._episodes_col = self._client.get_or_create_collection(COLLECTION_EPISODES, embedding_function=ef)
             self._sessions_col = self._client.get_or_create_collection(COLLECTION_SESSIONS, embedding_function=ef)
@@ -61,6 +76,14 @@ class VectorMemory:
             log.warning("chromadb not installed — VectorMemory disabled. Run: pip install chromadb")
         except Exception as e:
             log.warning("VectorMemory init failed: %s", e)
+
+    def _disable(self, exc) -> None:
+        """Turn off the vector store after a runtime embedding failure so we
+        don't retry (and spam/hang) on every subsequent call."""
+        if self._ready:
+            log.warning("Vector memory disabled at runtime (%s) — using keyword "
+                        "memory from here on.", exc)
+        self._ready = False
 
     @property
     def ready(self) -> bool:
@@ -78,7 +101,7 @@ class VectorMemory:
             self._memory_col.upsert(ids=[doc_id], documents=[text], metadatas=[meta])
             log.debug("Stored memory: %s", text[:60])
         except Exception as e:
-            log.warning("Vector store failed: %s", e)
+            self._disable(e)
 
     def search(self, query: str, n: int = 5, where: Optional[dict] = None) -> list[dict]:
         """Semantic search across stored memories."""
@@ -116,7 +139,7 @@ class VectorMemory:
                 metadatas=[meta]
             )
         except Exception as e:
-            log.warning("Episode store failed: %s", e)
+            self._disable(e)
 
     def search_episodes(self, query: str, n: int = 5) -> list[dict]:
         if not self._ready or not query.strip():
