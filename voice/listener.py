@@ -331,6 +331,7 @@ class MicrophoneListener:
         self,
         pre_speech_chunks: int = 4,
         verbose: bool = False,
+        on_status=None,
     ) -> np.ndarray | None:
         """
         Block until a complete spoken phrase is captured.
@@ -396,19 +397,41 @@ class MicrophoneListener:
         # The chunk that tripped onset detection was speech — seed that.
         endpointer.update(True)
 
+        # Cue thresholds: start hinting "still listening" once a pause exceeds
+        # ~400 ms (a real thinking pause) but before the end-of-turn gap.
+        pause_hint_chunks = ms_to_chunks(400, self._capture_rate, frames_per_chunk)
+        last_cue: str | None = None
+
+        def _cue(kind: str):
+            nonlocal last_cue
+            if on_status and kind != last_cue:
+                last_cue = kind
+                try:
+                    on_status(kind)
+                except Exception:
+                    pass
+
+        _cue("speaking")
         while self._running:
             chunk = self.read_chunk(timeout=0.5)
             if chunk is None:
                 continue
 
             phrase_chunks.append(chunk)
-            status = endpointer.update(self.is_speech(chunk))
+            is_sp  = self.is_speech(chunk)
+            status = endpointer.update(is_sp)
             if status == Endpointer.DONE:
                 break
             if status == Endpointer.TOO_LONG:
                 if verbose:
                     print("\033[33m[listener] Max phrase length reached — cutting.\033[0m")
                 break
+
+            # UX cue: are we mid-thought (pausing) or actively talking?
+            if is_sp:
+                _cue("speaking")
+            elif endpointer.trailing_silence >= pause_hint_chunks:
+                _cue("pausing")   # still capturing — waiting for you to continue
 
         total_chunks = len(phrase_chunks)
 

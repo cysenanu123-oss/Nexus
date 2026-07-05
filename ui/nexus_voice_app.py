@@ -387,6 +387,7 @@ class VoiceWorker(QThread):
     user_spoke    = pyqtSignal(str)
     error_msg     = pyqtSignal(str)
     amplitude     = pyqtSignal(float)   # live audio level → HUD pulse
+    listening_hint = pyqtSignal(str)    # e.g. "Still listening…" during a pause
 
     def __init__(self, demo: bool = False):
         super().__init__()
@@ -488,7 +489,13 @@ class VoiceWorker(QThread):
                 self.state_changed.emit("idle")
                 continue
 
-            audio = self._listener.capture_phrase(verbose=False)
+            def _on_capture_status(kind: str):
+                # Fired on transitions inside capture_phrase.
+                if kind == "pausing":
+                    self.listening_hint.emit("still listening…")
+
+            audio = self._listener.capture_phrase(
+                verbose=False, on_status=_on_capture_status)
             if audio is None or len(audio) == 0:
                 self.state_changed.emit("idle")
                 continue
@@ -727,6 +734,7 @@ class NexusApp(QMainWindow):
         self._worker.user_spoke.connect(self._on_user)
         self._worker.error_msg.connect(self._on_error)
         self._worker.amplitude.connect(self._field.set_amplitude)
+        self._worker.listening_hint.connect(self._on_hint)
         self._worker.start()
 
     # ── Slots ─────────────────────────────────────────────────
@@ -744,6 +752,10 @@ class NexusApp(QMainWindow):
 
     def _on_error(self, msg: str):
         self._append("ERR",   msg,  "#c03030")
+
+    def _on_hint(self, text: str):
+        # Reassure the user we're still capturing during a thinking pause.
+        self._append("···", text, "#3a6a9a")
 
     def _on_activate(self):
         if self._worker.isRunning():
